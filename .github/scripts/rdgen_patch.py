@@ -48,6 +48,80 @@ def patch_peer_card() -> None:
     write(path, new_s)
     print("[ok] peer_card.dart: 离线状态改为红色 X 图标（%d 处）" % count)
 
+def _iter_braces(s):
+    """按 Rust 词法扫描，只吐出真正的大括号（跳过字符串/字符/注释里的括号）。
+
+    rustdesk 源码里有 format!("{}")、"{" 这类字面量，按字符硬数括号会把函数体
+    提前截断，进而把整个文件切坏（cargo 报 unexpected closing delimiter）。
+    """
+    n = len(s)
+    i = 0
+    while i < n:
+        c = s[i]
+        if c == "/" and i + 1 < n and s[i + 1] == "/":
+            j = s.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if c == "/" and i + 1 < n and s[i + 1] == "*":
+            j = s.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c == '"':
+            i += 1
+            while i < n:
+                if s[i] == "\\":
+                    i += 2
+                elif s[i] == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+            continue
+        if c == "'":
+            # 字符字面量 'x' / '\n'；生命周期 'a 直接跳过
+            if (i + 2 < n and s[i + 2] == "'") or (i + 1 < n and s[i + 1] == "\\"):
+                i += 1
+                while i < n:
+                    if s[i] == "\\":
+                        i += 2
+                    elif s[i] == "'":
+                        i += 1
+                        break
+                    else:
+                        i += 1
+                continue
+            i += 1
+            continue
+        if c in "{}":
+            yield i, c
+        i += 1
+
+
+def _matching_brace(s: str, brace: int) -> int:
+    """返回与第 brace 个字符（'{'）配对的那个 '}' 的下标，找不到返回 -1。"""
+    depth = 0
+    for idx, ch in _iter_braces(s):
+        if idx < brace:
+            continue
+        if ch == "{":
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0:
+                return idx
+    return -1
+
+
+def _braces_balanced(s: str) -> bool:
+    """整文件括号健康检查：写入前用它兜底，宁可不打补丁也不能把源码切坏。"""
+    depth = 0
+    for _, ch in _iter_braces(s):
+        depth += 1 if ch == "{" else -1
+        if depth < 0:
+            return False
+    return depth == 0
+
+
 def _strip_function_body(decl: str) -> None:
     """把 src/common.rs 里 do_check_software_update 的整个函数体替换成 return Ok(())。"""
     path = "src/common.rs"
@@ -64,27 +138,21 @@ def _strip_function_body(decl: str) -> None:
         return
     start = s.index(signature)
     brace = s.index("{", start)
-    depth = 0
-    end = -1
-    for i in range(brace, len(s)):
-        ch = s[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                end = i
-                break
+    end = _matching_brace(s, brace)
     if end < 0:
-        print("[error] 括号配对失败，跳过 src/common.rs")
-        sys.exit(1)
+        print("[warn] 括号配对失败，跳过 src/common.rs（不写文件，避免把源码切坏）")
+        return
     new_body = (
         "pub async fn do_check_software_update() -> hbb_common::ResultType<()> {\n"
         "    // rdgen: skip update check\n"
         "    return Ok(());\n"
         "}"
     )
-    write(path, s[:start] + new_body + s[end + 1:])
+    new_s = s[:start] + new_body + s[end + 1:]
+    if not _braces_balanced(new_s):
+        print("[warn] 替换后括号不平衡，放弃写入 src/common.rs（保持源码原样）")
+        return
+    write(path, new_s)
     print("[ok] src/common.rs: do_check_software_update 函数体整体替换为 return Ok(())")
 
 def patch_update_url() -> None:

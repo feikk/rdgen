@@ -9,6 +9,7 @@
     python rdgen_patch.py links             # 把源码里所有 rustdesk.com 链接换成自定义官网/下载链接
     python rdgen_patch.py brand             # sciter 客户端：去掉「由 xxx 提供支持」并在原位居中放自定义图标
     python rdgen_patch.py no-install-tip    # sciter 客户端：去掉「你正在运行未安装版本…」粉色提示
+    python rdgen_patch.py copy-credentials  # sciter 客户端：左栏下方加「复制 ID 和密码」按钮
 两者都幂等，重复执行不会破坏文件。
 """
 import os
@@ -471,6 +472,86 @@ def patch_no_install_tip() -> None:
     if s != before:
         write(p, s)
 
+RG_COPY_CLASS = r"""class RgCopyCredentials: Reactor.Component {
+    function this() {
+        rgCopyCredentials = this;
+    }
+
+    render() {
+        return <div style="padding: 2px 0 10px 0; flow:horizontal">
+            <button #rdgen-copy-credentials .button style="width:*">{"复制 ID 和密码"}</button>
+        </div>;
+    }
+
+    event click $(button#rdgen-copy-credentials) (_, me) {
+        var id = get_id();
+        var pwd = password_cache && password_cache.length > 0 ? password_cache[0] : "";
+        var text = "ID: " + id;
+        if (pwd && pwd != "-") text = text + "\n密码: " + pwd;
+        handler.rdgen_copy_text(text);
+        if (me) {
+            me.text = "已复制";
+            self.timer(1500ms, function() { if (me) me.text = "复制 ID 和密码"; });
+        }
+    }
+}
+
+"""
+
+
+def patch_copy_credentials() -> None:
+    """仅受控客户端左栏下方加一个「复制 ID 和密码」按钮。
+
+    - src/ui.rs: 暴露 handler.rdgen_copy_text(String)，内部用 arboard 写系统剪贴板
+    - src/ui/index.tis: 插入 RgCopyCredentials 组件，并在 PasswordArea 之后渲染
+    """
+    rust_added = tis_added = False
+
+    p = "src/ui.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "rdgen_copy_text" in s:
+            print("[skip] src/ui.rs: 复制到剪贴板的 handler 已存在")
+        else:
+            anchor = "    fn get_id(&self) -> String {\n        ipc::get_id()\n    }\n"
+            method = ('    fn rdgen_copy_text(&self, text: String) {\n'
+                      '        use arboard::Clipboard as ClipboardContext;\n'
+                      '        if let Ok(mut ctx) = ClipboardContext::new() {\n'
+                      '            ctx.set_text(text).ok();\n'
+                      '        }\n'
+                      '    }\n\n')
+            if anchor in s:
+                s = s.replace(anchor, anchor + method, 1)
+                s = s.replace("        fn get_id();\n",
+                              "        fn get_id();\n        fn rdgen_copy_text(String);\n", 1)
+                write(p, s)
+                rust_added = True
+                print("[ok] src/ui.rs: 新增 handler.rdgen_copy_text")
+            else:
+                print("[warn] src/ui.rs: 没找到 get_id 锚点，剪贴板 handler 未插入")
+    else:
+        print("[info] 没有 src/ui.rs，跳过（flutter 客户端不需要）")
+
+    p = "src/ui/index.tis"
+    if os.path.exists(p):
+        s = read(p)
+        if "RgCopyCredentials" in s:
+            print("[skip] src/ui/index.tis: 复制按钮已存在")
+        else:
+            if "class App: Reactor.Component" in s and "{!outgoing_only && <PasswordArea />}" in s:
+                s = s.replace("class App: Reactor.Component", RG_COPY_CLASS + "class App: Reactor.Component", 1)
+                s = s.replace("                        {!outgoing_only && <PasswordArea />}\n",
+                              "                        {!outgoing_only && <PasswordArea />}\n"
+                              "                        {incoming_only ? <RgCopyCredentials /> : \"\"}\n", 1)
+                write(p, s)
+                tis_added = True
+                print("[ok] src/ui/index.tis: 已加入「复制 ID 和密码」按钮")
+            else:
+                print("[warn] src/ui/index.tis: 没找到 PasswordArea 锚点，按钮未插入")
+    else:
+        print("[info] 没有 src/ui/index.tis，跳过")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -480,6 +561,8 @@ def main() -> None:
         patch_peer_card()
     elif action == "brand":
         patch_brand()
+    elif action == "copy-credentials":
+        patch_copy_credentials()
     elif action == "no-install-tip":
         patch_no_install_tip()
     elif action == "incoming-width":

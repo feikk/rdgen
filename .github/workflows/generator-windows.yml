@@ -576,6 +576,15 @@ jobs:
             Write-Host "Error: printer-adapter folder not found in repository."
           }
 
+      - name: Set incoming-only min window width 360
+        continue-on-error: true
+        shell: bash
+        env:
+          INCOMING_ONLY_WIDTH: "360"
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py incoming-width
+
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk

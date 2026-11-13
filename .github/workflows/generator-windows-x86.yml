@@ -453,6 +453,32 @@ jobs:
           curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
           python rdgen_patch.py no-update-notif
 
+      - name: logo stuff (in-app logo)
+        if: ${{ env.logolink_url != 'false' }}
+        continue-on-error: true
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 15
+          shell: pwsh
+          continue_on_error: true
+          command: |
+            Invoke-WebRequest -Uri ${{ env.logolink_url }}/get_png?filename=${{ env.logolink_file }}"&"uuid=${{ env.logolink_uuid }} -OutFile ./res/logo.png
+            if (Test-Path ./res/logo.png) {
+              if (Get-Command magick -ErrorAction SilentlyContinue) { magick ./res/logo.png -resize 192x192 ./res/logo.png }
+              Write-Host "logo.png fetched:" (Get-Item ./res/logo.png).Length "bytes"
+            }
+
+      - name: Set incoming-only min window width 360
+        continue-on-error: true
+        shell: bash
+        env:
+          INCOMING_ONLY_WIDTH: "360"
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py incoming-width
+
       - name: brand (remove powered-by, center logo)
         continue-on-error: true
         shell: bash

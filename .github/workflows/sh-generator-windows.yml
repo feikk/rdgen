@@ -402,52 +402,15 @@ jobs:
                       print("Warning: RD_PRINTER_PORT not matched in RemotePrinter.cpp")
           
       # 仅受控端（incoming-only）主窗口默认宽度只有 280 px，这里改成最小 350 px
-      - name: Set incoming-only min window width 350
-        shell: python
+      - name: Set incoming-only min window width 360
+        continue-on-error: true
+        shell: bash
+        env:
+          INCOMING_ONLY_WIDTH: "360"
         run: |
-          import io, re, sys
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py incoming-width
 
-          MIN_W = 350
-          ok = True
-
-          # 1) 初始窗口尺寸（首次显示就是 350 宽）
-          p = "flutter/lib/common.dart"
-          with io.open(p, encoding="utf-8") as f:
-              s = f.read()
-          s, n = re.subn(r"var imcomingOnlyHomeSize = Size\((\d+(?:\.\d+)?), (\d+(?:\.\d+)?)\);",
-                         lambda m: "var imcomingOnlyHomeSize = Size(%d, %s);" % (MIN_W, m.group(2)), s, count=1)
-          if n:
-              with io.open(p, "w", encoding="utf-8") as f:
-                  f.write(s)
-              print("Successfully set incoming-only default width to %d" % MIN_W)
-          else:
-              ok = False
-              print("Warning: imcomingOnlyHomeSize default not matched in common.dart")
-
-          # 2) 首帧后 RustDesk 会按内容尺寸再缩一次窗，这里加最小宽度钳制
-          p = "flutter/lib/desktop/pages/desktop_home_page.dart"
-          with io.open(p, encoding="utf-8") as f:
-              s = f.read()
-          if "size.width < %d" % MIN_W in s:
-              print("incoming-only min width already patched")
-          else:
-              m = re.search(r"\n(\s*)final size = renderObject\.size;\n\1if \(size != imcomingOnlyHomeSize\) \{", s)
-              if m:
-                  ind = m.group(1)
-                  new = ("\n%svar size = renderObject.size;\n"
-                         "%sif (size.width < %d) size = Size(%d, size.height);\n"
-                         "%sif (size != imcomingOnlyHomeSize) {" % (ind, ind, MIN_W, MIN_W, ind))
-                  s = s.replace(m.group(0), new, 1)
-                  with io.open(p, "w", encoding="utf-8") as f:
-                      f.write(s)
-                  print("Successfully clamped incoming-only window min width to %d" % MIN_W)
-              else:
-                  ok = False
-                  print("Warning: _updateWindowSize not matched in desktop_home_page.dart")
-
-          # 没打上就直接失败，避免产出一个窗口仍然很窄的安装包
-          if not ok:
-              sys.exit(1)
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1

@@ -260,10 +260,10 @@ def patch_links() -> None:
                 print("[ok] %s: 已无 rustdesk.com 硬编码链接" % path)
 
 
-LOGO_CANDIDATES = ["res/128x128.png", "res/64x64.png", "res/icon.png"]
+LOGO_CANDIDATES = ["res/logo.png", "res/128x128.png", "res/64x64.png", "res/icon.png"]
 
 def _logo_data_uri() -> str:
-    """优先用 magick 生成的 64x64.png 转 data URI，避免把大图塞进 HTML。"""
+    """优先用「应用 Logo」(res/logo.png) 转 data URI；没有就退回应用图标。"""
     import base64
     for path in LOGO_CANDIDATES:
         if os.path.exists(path) and os.path.getsize(path) <= 512 * 1024:
@@ -342,6 +342,64 @@ def patch_brand() -> None:
 
 
 
+def patch_incoming_width() -> None:
+    """仅受控（incoming-only）客户端的窗口宽度。
+
+    - sciter(src/ui/index.tis): const incoming_only_width = 180 -> N（同时影响 windowMinSize 和输入框宽度）
+    - flutter: imcomingOnlyHomeSize 的宽度 + _updateWindowSize 里的最小宽度钳制
+    环境变量 INCOMING_ONLY_WIDTH，默认 360。
+    """
+    try:
+        width = int((os.environ.get("INCOMING_ONLY_WIDTH") or "360").strip())
+    except ValueError:
+        width = 360
+
+    # 1) sciter
+    p = "src/ui/index.tis"
+    if os.path.exists(p):
+        s = read(p)
+        s2, n = re.subn(r"const incoming_only_width = \d+;",
+                        "const incoming_only_width = %d;" % width, s, count=1)
+        if n:
+            write(p, s2)
+            print("[ok] src/ui/index.tis: incoming_only_width -> %d" % width)
+        else:
+            print("[info] src/ui/index.tis: 没找到 incoming_only_width，未改动（可能不是 sciter 客户端）")
+
+    # 2) flutter 默认尺寸
+    p = "flutter/lib/common.dart"
+    if os.path.exists(p):
+        s = read(p)
+        s2, n = re.subn(r"var imcomingOnlyHomeSize = Size\((\d+(?:\.\d+)?), (\d+(?:\.\d+)?)\);",
+                        lambda m: "var imcomingOnlyHomeSize = Size(%d, %s);" % (width, m.group(2)),
+                        s, count=1)
+        if n:
+            write(p, s2)
+            print("[ok] flutter/lib/common.dart: imcomingOnlyHomeSize -> width %d" % width)
+        else:
+            print("[info] flutter/lib/common.dart: 没匹配到 imcomingOnlyHomeSize")
+
+    # 3) flutter 首帧后按内容缩窗，补一个最小宽度钳制
+    p = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    if os.path.exists(p):
+        s = read(p)
+        marker = "size.width < %d" % width
+        if marker in s:
+            print("[skip] desktop_home_page.dart: 已经有最小宽度钳制")
+        else:
+            m = re.search(r"\n(\s*)final size = renderObject\.size;\n\1if \(size != imcomingOnlyHomeSize\) \{", s)
+            if m:
+                ind = m.group(1)
+                new = ("\n%svar size = renderObject.size;\n"
+                       "%sif (size.width < %d) size = Size(%d, size.height);\n"
+                       "%sif (size != imcomingOnlyHomeSize) {" % (ind, ind, width, width, ind))
+                write(p, s.replace(m.group(0), new, 1))
+                print("[ok] desktop_home_page.dart: 最小宽度钳制为 %d" % width)
+            else:
+                print("[warn] desktop_home_page.dart: 没匹配到 _updateWindowSize，未改动")
+
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -351,6 +409,8 @@ def main() -> None:
         patch_peer_card()
     elif action == "brand":
         patch_brand()
+    elif action == "incoming-width":
+        patch_incoming_width()
     elif action == "links":
         patch_links()
     elif action == "no-update-notif":

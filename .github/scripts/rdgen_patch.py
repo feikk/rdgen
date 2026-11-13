@@ -8,6 +8,7 @@
     python rdgen_patch.py no-update-notif   # 关闭新版本升级提示 / 客户端更新检查
     python rdgen_patch.py links             # 把源码里所有 rustdesk.com 链接换成自定义官网/下载链接
     python rdgen_patch.py brand             # sciter 客户端：去掉「由 xxx 提供支持」并在原位居中放自定义图标
+    python rdgen_patch.py no-install-tip    # sciter 客户端：去掉「你正在运行未安装版本…」粉色提示
 两者都幂等，重复执行不会破坏文件。
 """
 import os
@@ -433,6 +434,35 @@ def patch_incoming_width() -> None:
 
 
 
+def patch_no_install_tip() -> None:
+    """sciter 客户端：去掉「你正在运行未安装版本…」那块粉色安装提示。
+
+    该提示由 index.tis 里的
+      {(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}
+    渲染，把条件直接换成空字符串即可；<InstallMe /> 组件本身不动（设置页等仍在用）。
+    横幅去掉后窗口最小高度 390 会留空白，一并收到 300。
+    """
+    p = "src/ui/index.tis"
+    if not os.path.exists(p):
+        print("[info] 没有 src/ui/index.tis，跳过安装提示补丁")
+        return
+    s = read(p)
+    before = s
+
+    cond_old = '{(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}'
+    if cond_old in s:
+        s = s.replace(cond_old, '{""}', 1)
+        print("[ok] src/ui/index.tis: 已隐藏未安装提示横幅")
+    else:
+        print("[skip] src/ui/index.tis: 未安装提示横幅已隐藏或源码结构变了")
+
+    if "? 300 : 390" in s:
+        s = s.replace("? 300 : 390", "? 300 : 300")
+        print("[ok] src/ui/index.tis: 仅受控窗口最小高度 390 -> 300")
+
+    if s != before:
+        write(p, s)
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -442,6 +472,8 @@ def main() -> None:
         patch_peer_card()
     elif action == "brand":
         patch_brand()
+    elif action == "no-install-tip":
+        patch_no_install_tip()
     elif action == "incoming-width":
         patch_incoming_width()
     elif action == "links":

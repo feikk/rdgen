@@ -284,11 +284,10 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 15
           shell: pwsh
+          continue_on_error: true
           command: |
-            Invoke-WebRequest -Uri https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/allowCustom.py -OutFile allowCustom.py
-            python allowCustom.py
-            Invoke-WebRequest -Uri https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/forcePresetPassword.py -OutFile forcePresetPassword.py
-            python forcePresetPassword.py
+            Invoke-WebRequest -Uri https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/allowCustom.diff -OutFile allowCustom.diff
+            git apply allowCustom.diff
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
@@ -319,6 +318,32 @@ jobs:
           vcpkgDirectory: C:\vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
+
+      # vcpkg 2026-07 自带 NASM 3.01，aom 的 CMake 检测不认 3.x
+      # （报 "Unsupported nasm: multipass optimization not supported"），这里提前塞 2.16.01
+      - name: Pin NASM 2.16.01 for aom
+        shell: pwsh
+        run: |
+          $dir = "C:\vcpkg\downloads\tools\nasm\nasm-3.01"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if (-not (Test-Path "$dir\nasm.exe")) {
+            $urls = @(
+              "https://www.nasm.us/pub/nasm/releasebuilds/2.16.01/win64/nasm-2.16.01-win64.zip",
+              "https://www.nasm.dev/pub/nasm/releasebuilds/2.16.01/win64/nasm-2.16.01-win64.zip"
+            )
+            foreach ($u in $urls) {
+              try {
+                Invoke-WebRequest -Uri $u -OutFile "nasm216.zip" -UseBasicParsing
+                Write-Host "downloaded $u"
+                break
+              } catch {
+                Write-Host "download failed: $u"
+              }
+            }
+            Expand-Archive "nasm216.zip" -DestinationPath "nasm216" -Force
+            Copy-Item "nasm216\nasm-2.16.01\nasm.exe" "$dir\nasm.exe" -Force
+          }
+          & "$dir\nasm.exe" -v
 
       - name: Install vcpkg dependencies
         env:
@@ -524,11 +549,10 @@ jobs:
           Remove-Item ./Release/unsigned_files.zip
           Remove-Item ./Release/signed_files.zip
 
-      - name: Create custom_.txt file
+      - name: Create custom.txt file
         shell: bash
         run: |
-          # allowCustom.py renames the runtime path to custom_.txt.
-          echo -n "${{ env.custom }}" | cat > ./Release/custom_.txt
+          echo -n "${{ env.custom }}" | cat > ./Release/custom.txt
 
       - name: Build self-extracted executable
         shell: bash

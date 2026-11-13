@@ -252,39 +252,69 @@ def _logo_data_uri() -> str:
 def patch_brand() -> None:
     """sciter 客户端：把「由 xxx 提供支持」换成居中的自定义图标。
 
-    rustdesk 里这行是：{is_custom_client && handler.get_builtin_option("hide-powered-by-me") != "Y" ? <div .link #powered-by ...>{translate('powered_by_me')}</div> : ""}
+    rustdesk 里这行是：
+      {is_custom_client && handler.get_builtin_option("hide-powered-by-me") != "Y"
+          ? <div .link #powered-by style="opacity:0.5;font-size:0.8em;text-decoration:underline">
+              {translate('powered_by_me')}</div> : ""}
+
+    改动仅限这个 div 内部：换掉样式和文字内容，不动 TISX 的表达式结构。
+    之前那版直接把整段 {…} 换成静态 div 并插入 `<!-- -->` 注释，导致 sciter 的
+    TISX 解析失败、整个界面渲染成黑屏（index.tis 上游一个 HTML 注释都没有）。
     """
     path = "src/ui/index.tis"
     if not os.path.exists(path):
         print("[error] 找不到 %s" % path)
         sys.exit(1)
     s = read(path)
-    if "rdgen: centered brand logo" in s:
+    if "#rdgen-brand" in s:
         print("[skip] index.tis 已经处理过 powered-by / logo")
         return
     logo = _logo_data_uri()
-    if logo:
-        block = ('<div style="flow:horizontal; margin:0 *; padding:2px 0 8px 0;">'
-                 '<img src="%s" style="width:72px; height:72px;" />'
-                 '</div><!-- rdgen: centered brand logo -->' % logo)
-    else:
-        block = '<!-- rdgen: centered brand logo -->'
-
-    pattern = re.compile(
-        r'\{\s*is_custom_client\s*&&\s*handler\.get_builtin_option\("hide-powered-by-me"\)\s*!=\s*"Y"\s*'
-        r'\?[\s\S]*?:\s*""\s*\}',
-    )
-    new_s, n = pattern.subn(block, s)
-    if n == 0:
-        print("[warn] 没匹配到 powered-by 那一行，源码可能已改版，跳过")
+    if not logo and "hide-powered-by-me" not in s:
+        print("[skip] 既没有可用图标，也没有 powered-by 那行，未改动")
         return
-    # 顺手去掉已经无主的 #powered-by 点击事件（元素已删除，事件留着只是死代码）
+
+    open_tag_old = ('<div .link #powered-by '
+                    'style="opacity:0.5;font-size:0.8em;text-decoration:underline">')
+    open_tag_new = ('<div .link #rdgen-brand '
+                    'style="flow:horizontal; horizontal-align:center; '
+                    'padding:2px 0 6px 0; opacity:1;">')
+
+    new_s = s
+    if open_tag_old in new_s:
+        new_s = new_s.replace(open_tag_old, open_tag_new, 1)
+        if logo:
+            new_s = new_s.replace(
+                "{translate('powered_by_me')}",
+                '<img src="%s" style="width:72px; height:72px;" />' % logo, 1)
+        else:
+            new_s = new_s.replace("{translate('powered_by_me')}", "", 1)
+    else:
+        # 源码结构变了：退回到「整段隐藏」，不再插入 markup，先保证界面不黑屏
+        pattern = re.compile(
+            r'\{\s*is_custom_client\s*&&\s*handler\.get_builtin_option\("hide-powered-by-me"\)\s*!=\s*"Y"\s*'
+            r'\?[\s\S]*?:\s*""\s*\}',
+        )
+        new_s, n = pattern.subn("", new_s)
+        if n == 0:
+            print("[warn] 没匹配到 powered-by 那一行，源码可能已改版，跳过")
+            return
+        print("[warn] powered-by 结构不匹配，只做了隐藏，没有插入 Logo")
+
+    # 原 powered-by 点击事件会跳 rustdesk.com，元素 id 已改名，顺手删掉
     handler = re.compile(r'event\s+click\s+\$\(#powered-by\)\s*\{[^}]*\}')
-    new_s, nh = handler.subn('', new_s)
+    new_s, nh = handler.subn("", new_s)
     if nh:
         print("[ok] 已移除 #powered-by 的点击事件（%d 处）" % nh)
+
+    # 兜底：确认没有引入 sciter 解析不了的东西（HTML 注释曾导致黑屏）
+    if "<!--" in new_s or "-->" in new_s:
+        print("[warn] 补丁结果里出现 HTML 注释，放弃写入 src/ui/index.tis")
+        return
+
     write(path, new_s)
     print("[ok] src/ui/index.tis: 已移除 powered-by%s" % ("，并在原位居中显示 Logo" if logo else ""))
+
 
 
 def main() -> None:

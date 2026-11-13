@@ -48,6 +48,8 @@ env:
   MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
   UPLOAD_ARTIFACT: 'true'
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
+  WINDOWS_PFX_BASE64: "${{ secrets.WINDOWS_PFX_BASE64 }}"
+  WINDOWS_PFX_PASSWORD: "${{ secrets.WINDOWS_PFX_PASSWORD }}"
   STATUS_URL: "${{ secrets.GENURL }}/updategh"
 
 jobs:
@@ -76,6 +78,7 @@ jobs:
             }
           # - { target: aarch64-pc-windows-msvc, os: windows-2022 }
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
         
@@ -195,6 +198,7 @@ jobs:
           sed -i -e 's|reg delete HKEY_CLASSES_ROOT\\\\.{ext} /f|reg delete \\\"HKEY_CLASSES_ROOT\\\\.{ext}\\\" /f|' ./src/platform/windows.rs
           sed -i -e 's|reg delete HKEY_CLASSES_ROOT\\\\{ext} /f|reg delete \\\"HKEY_CLASSES_ROOT\\\\{ext}\\\" /f|' ./src/platform/windows.rs
           
+
       - name: change company name
         if: env.compname != 'Purslane Ltd'
         continue-on-error: true
@@ -209,6 +213,7 @@ jobs:
           sed -i -e 's|Purslane Ltd.|${{ env.compname }}|' ./libs/portable/Cargo.toml
           sed -i -e 's|Purslane Ltd|${{ env.compname }}|' ./src/main.rs
              
+
       - name: change url to custom
         if: env.urlLink != 'https://rustdesk.com'
         continue-on-error: true
@@ -223,9 +228,12 @@ jobs:
         if: env.downloadLink != 'https://rustdesk.com/download'
         continue-on-error: true
         shell: bash
+        env:
+          LINK_HOME: ${{ env.urlLink }}
+          LINK_DOWNLOAD: ${{ env.downloadLink }}
         run: |
-          sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./src/ui/index.tis
-          sed -i -e 's|&download_url|"${{ env.downloadLink }}"|' ./src/updater.rs
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python rdgen_patch.py links
 
       - name: set server, serverPort, key, and apiserver
         continue-on-error: true
@@ -321,6 +329,7 @@ jobs:
 
       # vcpkg 2026-07 自带 NASM 3.01，aom 的 CMake 检测不认 3.x
       # （报 "Unsupported nasm: multipass optimization not supported"），这里提前塞 2.16.01
+
       - name: Pin NASM 2.16.01 for aom
         shell: pwsh
         run: |
@@ -411,7 +420,6 @@ jobs:
             magick ./res/icon.png -resize 128x128 ./res/128x128.png
             magick ./res/128x128.png -resize 200% ./res/128x128@2x.png
 
-
       - name: ui.rs icon
         if: ${{ env.iconlink_url != 'false' }}
         continue-on-error: true
@@ -441,9 +449,16 @@ jobs:
         continue-on-error: true
         if: env.removeNewVersionNotif == 'true'
         shell: bash
-        run: | 
-          sed -i -e 's|{software_update_url ? <UpdateMe /> : ""}||' ./src/ui/index.tis
-          #sed -i '/let (request, url) =/,/Ok(())/{/Ok(())/!d}' ./src/common.rs
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python rdgen_patch.py no-update-notif
+
+      - name: brand (remove powered-by, center logo)
+        continue-on-error: true
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python rdgen_patch.py brand
 
       - name: Build rustdesk
         id: build
@@ -521,6 +536,7 @@ jobs:
             ls -l ./libs/portable/Runner.res;
           fi
       
+
       - name: zip dlls
         continue-on-error: true
         shell: pwsh
@@ -548,6 +564,27 @@ jobs:
           Expand-Archive -Path ./Release/signed_files.zip -DestinationPath ./Release/ -Force
           Remove-Item ./Release/unsigned_files.zip
           Remove-Item ./Release/signed_files.zip
+
+      - name: sign binaries with own certificate (signtool)
+        if: env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PWD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "code-sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "x64" } | Select-Object -Last 1).FullName
+          if (-not $signtool) { throw "signtool.exe not found in Windows Kits" }
+          $files = Get-ChildItem ./Release -Recurse -Include *.exe,*.dll -ErrorAction SilentlyContinue
+          if (-not $files) { Write-Host "no signable files in ./Release"; exit 0 }
+          foreach ($f in $files) {
+            Write-Host "signing $($f.FullName)"
+            & $signtool sign /fd sha256 /f $pfx /p $env:PFX_PWD /tr http://timestamp.digicert.com /td sha256 /v $f.FullName
+            if ($LASTEXITCODE -ne 0) { throw "sign failed: $($f.FullName)" }
+          }
+          Remove-Item $pfx -Force
 
       - name: Create custom.txt file
         shell: bash
@@ -599,6 +636,27 @@ jobs:
           Remove-Item ./SignOutput/unsigned_files.zip
           Remove-Item ./SignOutput/signed_files.zip
 
+      - name: sign installers with own certificate (signtool)
+        if: env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PWD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "code-sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "x64" } | Select-Object -Last 1).FullName
+          if (-not $signtool) { throw "signtool.exe not found in Windows Kits" }
+          $files = Get-ChildItem ./SignOutput -Recurse -File -ErrorAction SilentlyContinue | Where-Object { @('.exe','.msi') -contains $_.Extension }
+          if (-not $files) { Write-Host "no signable files in ./SignOutput"; exit 0 }
+          foreach ($f in $files) {
+            Write-Host "signing $($f.FullName)"
+            & $signtool sign /fd sha256 /f $pfx /p $env:PFX_PWD /tr http://timestamp.digicert.com /td sha256 /v $f.FullName
+            if ($LASTEXITCODE -ne 0) { throw "sign failed: $($f.FullName)" }
+          }
+          Remove-Item $pfx -Force
+
       - name: rename rustdesk.exe to filename.exe
         run: |
           mv ./SignOutput/rustdesk.exe "./SignOutput/${{ env.filename }}.exe" || echo "rustdesk"
@@ -621,6 +679,7 @@ jobs:
     continue-on-error: true
     if: always()
     steps:
+
       - name: Delete secrets artifact
         uses: geekyeggo/delete-artifact@v5
         with:

@@ -159,7 +159,7 @@ def patch_links() -> None:
                 print("[ok] %s: 已无 rustdesk.com 硬编码链接" % path)
 
 
-LOGO_CANDIDATES = ["res/64x64.png", "res/128x128.png", "res/icon.png"]
+LOGO_CANDIDATES = ["res/128x128.png", "res/64x64.png", "res/icon.png"]
 
 def _logo_data_uri() -> str:
     """优先用 magick 生成的 64x64.png 转 data URI，避免把大图塞进 HTML。"""

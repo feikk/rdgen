@@ -404,12 +404,16 @@ def patch_incoming_width() -> None:
     p = "flutter/lib/common.dart"
     if os.path.exists(p):
         s = read(p)
+        try:
+            height = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "350").strip())
+        except ValueError:
+            height = 350
         s2, n = re.subn(r"var imcomingOnlyHomeSize = Size\((\d+(?:\.\d+)?), (\d+(?:\.\d+)?)\);",
-                        lambda m: "var imcomingOnlyHomeSize = Size(%d, %s);" % (width, m.group(2)),
+                        lambda m: "var imcomingOnlyHomeSize = Size(%d, %d);" % (width, height),
                         s, count=1)
         if n:
             write(p, s2)
-            print("[ok] flutter/lib/common.dart: imcomingOnlyHomeSize -> width %d" % width)
+            print("[ok] flutter/lib/common.dart: imcomingOnlyHomeSize -> %dx%d" % (width, height))
         else:
             print("[info] flutter/lib/common.dart: 没匹配到 imcomingOnlyHomeSize")
 
@@ -456,9 +460,13 @@ def patch_no_install_tip() -> None:
     else:
         print("[skip] src/ui/index.tis: 未安装提示横幅已隐藏或源码结构变了")
 
-    if "? 300 : 390" in s:
-        s = s.replace("? 300 : 390", "? 300 : 300")
-        print("[ok] src/ui/index.tis: 仅受控窗口最小高度 390 -> 300")
+    try:
+        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "350").strip())
+    except ValueError:
+        h = 350
+    s, nh = re.subn(r"\? 300 : (?:300|390)", "? %d : %d" % (h, h), s, count=1)
+    if nh:
+        print("[ok] src/ui/index.tis: 仅受控窗口默认/最小高度 -> %d" % h)
 
     if s != before:
         write(p, s)

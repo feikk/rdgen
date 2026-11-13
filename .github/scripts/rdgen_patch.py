@@ -199,12 +199,37 @@ def patch_links() -> None:
         "flutter/lib/desktop/pages/desktop_home_page.dart",
         "flutter/lib/mobile/pages/connection_page.dart",
         "flutter/lib/desktop/widgets/update_progress.dart",
+        "flutter/lib/desktop/pages/desktop_setting_page.dart",
     ]
+
+    # 「设置 - 关于」里的 Website 链接单独处理：指向更新下载链接，而不是官网。
+    # 这段要在通用替换之前做，否则 https://rustdesk.com 已经被换成官网链接了；
+    # 同时也兼容工作流里 sed 先把它换成官网链接的情况。
+    def patch_about_website(text: str, want: str) -> str:
+        if not dl:
+            return text
+        candidates = ["https://rustdesk.com"] + ([home] if home else [])
+        for old in [c for c in candidates if c]:
+            # sciter: <div .link .custom-event url='https://rustdesk.com'>" + translate("Website")
+            text = text.replace(
+                "<div .link .custom-event url='%s'>\" + translate(\"Website\")" % old,
+                "<div .link .custom-event url='%s'>\" + translate(\"Website\")" % dl,
+            )
+            # flutter: launchUrlString('https://rustdesk.com'); ... translate('Website')
+            text = re.sub(
+                r"(launchUrlString\('%s'\);\s*\}\s*,\s*child: Text\(\s*translate\('Website'\))"
+                % re.escape(old),
+                lambda m: m.group(1).replace(old, dl),
+                text,
+            )
+        return text
+
     for path in targets:
         if not os.path.exists(path):
             continue
         s = read(path)
         before = s
+        s = patch_about_website(s, dl)
         # 1) 更新下载链接（含旧版 updater.rs 的 &download_url 占位）
         if dl:
             s = s.replace("https://rustdesk.com/download", dl)

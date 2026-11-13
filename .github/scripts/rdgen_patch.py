@@ -532,6 +532,8 @@ def patch_copy_credentials() -> None:
     else:
         print("[info] 没有 src/ui.rs，跳过（flutter 客户端不需要）")
 
+    patch_inline_sciter_encoding()
+
     p = "src/ui/index.tis"
     if os.path.exists(p):
         s = read(p)
@@ -550,6 +552,42 @@ def patch_copy_credentials() -> None:
                 print("[warn] src/ui/index.tis: 没找到 PasswordArea 锚点，按钮未插入")
     else:
         print("[info] 没有 src/ui/index.tis，跳过")
+
+
+
+def patch_inline_sciter_encoding() -> None:
+    """res/inline-sciter.py 默认用系统编码(cp1252)读 src/ui/*.tis。
+
+    TISX 里一旦出现中文（例如「复制 ID 和密码」按钮），Windows runner 上就会
+    UnicodeDecodeError 直接构建失败。这里让它的 open() 默认按 UTF-8 读写。
+    """
+    p = "res/inline-sciter.py"
+    if not os.path.exists(p):
+        print("[info] 没有 res/inline-sciter.py，跳过编码补丁")
+        return
+    s = read(p)
+    if "_rdgen_open" in s:
+        print("[skip] res/inline-sciter.py: UTF-8 读取补丁已存在")
+        return
+    anchor = "import re\n"
+    wrapper = ("""import re
+import builtins as _rdgen_builtins
+
+_rdgen_open = _rdgen_builtins.open
+
+
+def open(path, mode="r", *args, **kwargs):
+    if "b" not in mode and "encoding" not in kwargs:
+        kwargs["encoding"] = "utf-8"
+    return _rdgen_open(path, mode, *args, **kwargs)
+""")
+    if anchor in s:
+        s = s.replace(anchor, wrapper, 1)
+        write(p, s)
+        print("[ok] res/inline-sciter.py: 已改为按 UTF-8 读取 UI 源码")
+    else:
+        print("[warn] res/inline-sciter.py: 没找到 import re 锚点，未改动")
+
 
 
 def main() -> None:

@@ -14,6 +14,14 @@ import os
 import re
 import sys
 
+# Windows 的 Python 控制台默认是 cp1252，打印中文日志会抛 UnicodeEncodeError
+# 并让脚本中途退出（补丁没打上、构建却仍显示 success）。强制改成 UTF-8。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 def read(path: str) -> str:
     with open(path, "r", encoding="utf-8", newline="") as f:
         return f.read()

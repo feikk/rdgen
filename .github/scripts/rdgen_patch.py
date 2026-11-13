@@ -262,17 +262,50 @@ def patch_links() -> None:
 
 LOGO_CANDIDATES = ["res/logo.png", "res/128x128.png", "res/64x64.png", "res/icon.png"]
 
-def _logo_data_uri() -> str:
-    """优先用「应用 Logo」(res/logo.png) 转 data URI；没有就退回应用图标。"""
+def _png_size(raw: bytes):
+    """从 PNG 的 IHDR 里读宽高，用来按原始比例算显示尺寸（避免把横向 Logo 压成方块）。"""
+    try:
+        if raw[:8] != b"\x89PNG\r\n\x1a\n":
+            return None
+        w = int.from_bytes(raw[16:20], "big")
+        h = int.from_bytes(raw[20:24], "big")
+        if w > 0 and h > 0:
+            return w, h
+    except Exception:
+        pass
+    return None
+
+
+def _fit_box(w: int, h: int, max_w: int, max_h: int):
+    """等比缩放到 max_w x max_h 的框内，不裁切、不拉伸。"""
+    scale = min(float(max_w) / w, float(max_h) / h)
+    if scale > 1:
+        scale = 1.0
+    return max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+
+
+def _logo_data_uri():
+    """优先用「应用 Logo」(res/logo.png) 转 data URI；没有就退回应用图标。
+
+    返回 (data_uri, 显示宽, 显示高)，显示尺寸按原始宽高比等比缩放。
+    """
     import base64
     for path in LOGO_CANDIDATES:
-        if os.path.exists(path) and os.path.getsize(path) <= 512 * 1024:
+        if os.path.exists(path) and os.path.getsize(path) <= 1024 * 1024:
             with open(path, "rb") as f:
-                b = base64.b64encode(f.read()).decode()
-            print("[ok] 使用 %s 作为界面 Logo（%d bytes）" % (path, os.path.getsize(path)))
-            return "data:image/png;base64," + b
-    print("[warn] 没找到可用的 icon png，界面只去掉 powered-by 文字，不插入 Logo")
-    return ""
+                raw = f.read()
+            size = _png_size(raw)
+            if size:
+                dw, dh = _fit_box(size[0], size[1], 200, 84)
+                note = "%dx%d -> 显示 %dx%d" % (size[0], size[1], dw, dh)
+            else:
+                dw, dh = 72, 72
+                note = "尺寸未知，按 72x72"
+            b = base64.b64encode(raw).decode()
+            print("[ok] 使用 %s 作为界面 Logo（%d bytes，%s）" % (path, len(raw), note))
+            return "data:image/png;base64," + b, dw, dh
+    print("[warn] 没找到可用的 png，界面只去掉 powered-by 文字，不插入 Logo")
+    return "", 0, 0
 
 def patch_brand() -> None:
     """sciter 客户端：把「由 xxx 提供支持」换成居中的自定义图标。
@@ -294,7 +327,7 @@ def patch_brand() -> None:
     if "#rdgen-brand" in s:
         print("[skip] index.tis 已经处理过 powered-by / logo")
         return
-    logo = _logo_data_uri()
+    logo, lw, lh = _logo_data_uri()
     if not logo and "hide-powered-by-me" not in s:
         print("[skip] 既没有可用图标，也没有 powered-by 那行，未改动")
         return
@@ -311,7 +344,7 @@ def patch_brand() -> None:
         if logo:
             new_s = new_s.replace(
                 "{translate('powered_by_me')}",
-                '<img src="%s" style="width:72px; height:72px;" />' % logo, 1)
+                '<img src="%s" style="width:%dpx; height:%dpx;" />' % (logo, lw, lh), 1)
         else:
             new_s = new_s.replace("{translate('powered_by_me')}", "", 1)
     else:

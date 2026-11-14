@@ -479,7 +479,7 @@ def patch_no_install_tip() -> None:
 
 JS_PWD = "\\u5bc6\\u7801:  "
 
-RG_COPY_MARKUP = ('                        {incoming_only ? <div style="padding: 12px 0 16px 0">'
+RG_COPY_MARKUP = ('                        {incoming_only ? <div style="padding: 16px 0 10px 0">'
                   '<button #rdgen-copy-credentials .button style="width:*; height:38px; font-size:1.05em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
 

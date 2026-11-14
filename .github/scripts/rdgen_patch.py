@@ -480,8 +480,18 @@ def patch_no_install_tip() -> None:
 
 JS_PWD = "\\u5bc6\\u7801:  "
 
+RG_TIP_FUNC = ('function rdgen_tip(text) {\n'
+              '    var old = $(div#rdgen-tip);\n'
+              '    if (old) old.remove();\n'
+              '    var tip = <div #rdgen-tip style="position:absolute; left:50%; margin-left:-116px; '
+              'bottom:96px; width:232px; padding:9px 6px; border-radius:6px; background:#2b2b2b; '
+              'color:#ffffff; font-size:0.9em; text-align:center; z-index:99;">{text}</div>;\n'
+              '    self.append(tip);\n'
+              '    self.timer(2s, function() { tip.remove(); });\n'
+              '}\n\n')
+
 RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 16px 0 10px 0">'
-                  '<button #rdgen-copy-credentials .button style="width:*; height:38px; font-size:1em">'
+                  '<button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
 
 RG_FLUTTER_METHOD = """
@@ -518,11 +528,12 @@ RG_FLUTTER_METHOD = """
 """
 
 RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() && handler.get_builtin_option("prebtn") == "Y" ? '
-                  '<div style="padding: 0 0 10px 0"><button #rdgen-run-as-admin .button '
+                  '<div style="padding: 0 0 10px 0"><button #rdgen-run-as-admin .button .outline '
                   'style="width:*; height:34px; font-size:1em">'
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
 
 RG_ADMIN_HANDLER = ('event click $(button#rdgen-run-as-admin) {\n'
+                    '    rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
                     '    handler.rdgen_run_as_admin();\n'
                     '}\n\n')
 
@@ -533,6 +544,7 @@ RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
                    '    var rg_text = "ID: " + rg_id;\n'
                    '    if (rg_pwd && rg_pwd != "-") rg_text = rg_text + "\\n' + JS_PWD + '" + rg_pwd;\n'
                    '    handler.rdgen_copy_text(rg_text);\n'
+                   '    rdgen_tip("\\u590d\\u5236\\u6210\\u529f");\n'
                    '}\n\n')
 
 
@@ -619,7 +631,8 @@ def patch_copy_credentials() -> None:
         return
     s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP + RG_ADMIN_MARKUP, 1)
     s = s.replace(anchor_handler,
-                  "\n" + RG_COPY_HANDLER + RG_ADMIN_HANDLER + "function updatePasswordArea() {", 1)
+                  "\n" + RG_TIP_FUNC + RG_COPY_HANDLER + RG_ADMIN_HANDLER
+                  + "function updatePasswordArea() {", 1)
     write(p, s)
     print("[ok] src/ui/index.tis: 已加入复制 ID 和密码按钮")
 

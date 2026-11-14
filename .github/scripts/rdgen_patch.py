@@ -477,41 +477,28 @@ def patch_no_install_tip() -> None:
     if s != before:
         write(p, s)
 
-RG_COPY_CLASS = r"""class RgCopyCredentials: Reactor.Component {
-    function this() {
-        rgCopyCredentials = this;
-    }
+JS_PWD = "\\u5bc6\\u7801:  "
 
-    render() {
-        return <div style="padding: 2px 0 10px 0; flow:horizontal">
-            <button #rdgen-copy-credentials .button style="width:*">{"复制 ID 和密码"}</button>
-        </div>;
-    }
+RG_COPY_MARKUP = ('                        {incoming_only ? <div style="padding: 2px 0 10px 0">'
+                  '<button #rdgen-copy-credentials .button style="width:*">'
+                  '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
 
-    event click $(button#rdgen-copy-credentials) (_, me) {
-        var id = get_id();
-        var pwd = password_cache && password_cache.length > 0 ? password_cache[0] : "";
-        var text = "ID: " + id;
-        if (pwd && pwd != "-") text = text + "\n密码: " + pwd;
-        handler.rdgen_copy_text(text);
-        if (me) {
-            me.text = "已复制";
-            self.timer(1500ms, function() { if (me) me.text = "复制 ID 和密码"; });
-        }
-    }
-}
-
-"""
+RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
+                   '    var rg_id = get_id();\n'
+                   '    var rg_pwd = password_cache && password_cache.length > 0 ? password_cache[0] : "";\n'
+                   '    var rg_text = "ID: " + rg_id;\n'
+                   '    if (rg_pwd && rg_pwd != "-") rg_text = rg_text + "\\n' + JS_PWD + '" + rg_pwd;\n'
+                   '    handler.rdgen_copy_text(rg_text);\n'
+                   '}\n\n')
 
 
 def patch_copy_credentials() -> None:
     """仅受控客户端左栏下方加一个「复制 ID 和密码」按钮。
 
     - src/ui.rs: 暴露 handler.rdgen_copy_text(String)，内部用 arboard 写系统剪贴板
-    - src/ui/index.tis: 插入 RgCopyCredentials 组件，并在 PasswordArea 之后渲染
+    - src/ui/index.tis: PasswordArea 之后插入按钮，事件处理放在脚本顶层
+    - 文案用 HTML 实体 / \\u 转义，保证 .tis 里不出现非 ASCII 字节
     """
-    rust_added = tis_added = False
-
     p = "src/ui.rs"
     if os.path.exists(p):
         s = read(p)
@@ -530,7 +517,6 @@ def patch_copy_credentials() -> None:
                 s = s.replace("        fn get_id();\n",
                               "        fn get_id();\n        fn rdgen_copy_text(String);\n", 1)
                 write(p, s)
-                rust_added = True
                 print("[ok] src/ui.rs: 新增 handler.rdgen_copy_text")
             else:
                 print("[warn] src/ui.rs: 没找到 get_id 锚点，剪贴板 handler 未插入")
@@ -540,24 +526,22 @@ def patch_copy_credentials() -> None:
     patch_inline_sciter_encoding()
 
     p = "src/ui/index.tis"
-    if os.path.exists(p):
-        s = read(p)
-        if "RgCopyCredentials" in s:
-            print("[skip] src/ui/index.tis: 复制按钮已存在")
-        else:
-            if "class App: Reactor.Component" in s and "{!outgoing_only && <PasswordArea />}" in s:
-                s = s.replace("class App: Reactor.Component", RG_COPY_CLASS + "class App: Reactor.Component", 1)
-                s = s.replace("                        {!outgoing_only && <PasswordArea />}\n",
-                              "                        {!outgoing_only && <PasswordArea />}\n"
-                              "                        {incoming_only ? <RgCopyCredentials /> : \"\"}\n", 1)
-                write(p, s)
-                tis_added = True
-                print("[ok] src/ui/index.tis: 已加入「复制 ID 和密码」按钮")
-            else:
-                print("[warn] src/ui/index.tis: 没找到 PasswordArea 锚点，按钮未插入")
-    else:
+    if not os.path.exists(p):
         print("[info] 没有 src/ui/index.tis，跳过")
-
+        return
+    s = read(p)
+    if "rdgen-copy-credentials" in s:
+        print("[skip] src/ui/index.tis: 复制按钮已存在")
+        return
+    anchor_markup = "                        {!outgoing_only && <PasswordArea />}\n"
+    anchor_handler = "\nfunction updatePasswordArea() {"
+    if anchor_markup not in s or anchor_handler not in s:
+        print("[warn] src/ui/index.tis: 锚点没找到，按钮未插入")
+        return
+    s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP, 1)
+    s = s.replace(anchor_handler, "\n" + RG_COPY_HANDLER + "function updatePasswordArea() {", 1)
+    write(p, s)
+    print("[ok] src/ui/index.tis: 已加入复制 ID 和密码按钮")
 
 
 def patch_inline_sciter_encoding() -> None:

@@ -688,6 +688,120 @@ def patch_flutter_copy_button() -> None:
     print("[ok] desktop_home_page.dart: 已加入复制 ID 和密码按钮")
 
 
+RG_FLUTTER_ADMIN_METHOD = """
+  Widget buildRdgenRunAsAdminButton() {
+    if (bind.mainGetBuildinOption('prebtn') != 'Y') return SizedBox();
+    if (bind.mainIsInstalled()) return SizedBox();
+    if (bind.rdgenIsElevated()) return SizedBox();
+    return Padding(
+      padding: const EdgeInsets.only(left: 20.0, right: 16, bottom: 10),
+      child: SizedBox(
+        width: double.infinity,
+        height: 38,
+        child: OutlinedButton(
+          onPressed: () {
+            showToast('\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743');
+            bind.rdgenRunAsAdmin();
+          },
+          child: Text('\\u7ba1\\u7406\\u5458\\u6743\\u9650\\u8fd0\\u884c',
+              style: TextStyle(fontSize: 14)),
+        ),
+      ),
+    );
+  }
+
+"""
+
+RG_FLUTTER_FFI_ANCHOR = """pub fn main_get_buildin_option(key: String) -> SyncReturn<String> {
+    SyncReturn(get_builtin_option(&key))
+}
+"""
+
+RG_FLUTTER_FFI_CODE = """
+
+#[cfg(target_os = "windows")]
+#[inline]
+pub fn rdgen_is_elevated() -> SyncReturn<bool> {
+    // rdgen: 顺带清掉历史版本写进本地配置的 pre-elevate-service=Y，
+    // 避免每次启动都被拉起便携服务而弹 UAC
+    std::sync::Once::new().call_once(|| {
+        if hbb_common::config::LocalConfig::get_option("pre-elevate-service") == "Y" {
+            let _ = hbb_common::config::LocalConfig::set_option(
+                "pre-elevate-service".to_owned(),
+                String::new(),
+            );
+        }
+    });
+    SyncReturn(crate::platform::is_elevated(None).unwrap_or(false))
+}
+
+#[cfg(target_os = "windows")]
+pub fn rdgen_run_as_admin() {
+    std::thread::spawn(|| {
+        // 只把便携服务以管理员身份拉起（弹 UAC），界面进程不重启；
+        // 一次性开关，下次正常启动不会弹窗
+        crate::portable_service::set_rdgen_elevate_once(true);
+        crate::portable_service::client::set_quick_support(true);
+        if crate::portable_service::client::running() {
+            if let Ok(true) = crate::platform::elevate("") {
+                std::process::exit(0);
+            }
+            return;
+        }
+        if let Err(e) = crate::portable_service::client::start_portable_service(
+            crate::portable_service::client::StartPara::Direct,
+        ) {
+            log::warn!("start elevated portable service failed: {e}");
+        }
+    });
+}
+"""
+
+
+def patch_flutter_run_as_admin() -> None:
+    """flutter（64 位标准端）也加「管理员权限运行」按钮，由 prebtn=Y 控制。
+
+    - src/server/portable_service.rs: 与 32 位共用「一次性开关 + runas 拉起便携服务」
+    - src/flutter_ffi.rs: 暴露 rdgen_is_elevated / rdgen_run_as_admin 给 dart
+      （flutter_rust_bridge 按这个文件生成 flutter/lib/generated_bridge.dart）
+    - desktop_home_page.dart: 复制按钮下面加按钮，未安装且未提权才显示
+    """
+    patch_ps_elevate_launch()
+
+    p = "src/flutter_ffi.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/flutter_ffi.rs，跳过 flutter 提权按钮")
+        return
+    s = read(p)
+    if "rdgen_run_as_admin" in s:
+        print("[skip] src/flutter_ffi.rs: 提权接口已存在")
+    elif RG_FLUTTER_FFI_ANCHOR in s:
+        s = s.replace(RG_FLUTTER_FFI_ANCHOR, RG_FLUTTER_FFI_ANCHOR + RG_FLUTTER_FFI_CODE, 1)
+        write(p, s)
+        print("[ok] src/flutter_ffi.rs: 新增 rdgen_is_elevated / rdgen_run_as_admin")
+    else:
+        print("[warn] src/flutter_ffi.rs: 锚点没找到，未加提权接口")
+
+    p = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 desktop_home_page.dart，跳过 flutter 提权按钮")
+        return
+    s = read(p)
+    if "buildRdgenRunAsAdminButton" in s:
+        print("[skip] desktop_home_page.dart: 管理员按钮已存在")
+        return
+    call_anchor = ("      if (!isOutgoingOnly && bind.mainGetBuildinOption('copybtn') == 'Y')"
+                   " buildRdgenCopyButton(),\n")
+    method_anchor = "\n  buildPasswordBoard(BuildContext context) {"
+    if call_anchor not in s or method_anchor not in s:
+        print("[warn] desktop_home_page.dart: 锚点没找到（先跑 flutter-copy-credentials？）")
+        return
+    s = s.replace(call_anchor, call_anchor + "      buildRdgenRunAsAdminButton(),\n", 1)
+    s = s.replace(method_anchor, "\n" + RG_FLUTTER_ADMIN_METHOD + "  buildPasswordBoard(BuildContext context) {", 1)
+    write(p, s)
+    print("[ok] desktop_home_page.dart: 已加入管理员权限运行按钮")
+
+
 def patch_inline_sciter_encoding() -> None:
     """res/inline-sciter.py 默认用系统编码(cp1252)读 src/ui/*.tis。
 
@@ -887,6 +1001,7 @@ def main() -> None:
         patch_copy_credentials()
     elif action == "flutter-copy-credentials":
         patch_flutter_copy_button()
+        patch_flutter_run_as_admin()
     elif action == "run-as-admin":
         patch_ps_elevate_launch()
     elif action == "permissions":

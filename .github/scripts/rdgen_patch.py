@@ -517,6 +517,16 @@ RG_FLUTTER_METHOD = """
 
 """
 
+RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.rdgen_is_elevated() ? '
+                  '<div style="padding: 0 0 10px 0"><button #rdgen-run-as-admin .button '
+                  'style="width:*; height:34px; font-size:1em">'
+                  '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
+
+RG_ADMIN_HANDLER = ('event click $(button#rdgen-run-as-admin) {\n'
+                    '    handler.rdgen_run_as_admin();\n'
+                    '}\n\n')
+
+
 RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
                    '    var rg_id = get_id();\n'
                    '    var rg_pwd = password_cache && password_cache.length > 0 ? password_cache[0] : "";\n'
@@ -545,11 +555,30 @@ def patch_copy_credentials() -> None:
                       '        if let Ok(mut ctx) = ClipboardContext::new() {\n'
                       '            ctx.set_text(text).ok();\n'
                       '        }\n'
+                      '    }\n\n'
+                      '    fn rdgen_is_elevated(&self) -> bool {\n'
+                      '        crate::platform::is_elevated(None).unwrap_or(false)\n'
+                      '    }\n\n'
+                      '    fn rdgen_run_as_admin(&self) {\n'
+                      '        if crate::platform::is_elevated(None).unwrap_or(false) {\n'
+                      '            return;\n'
+                      '        }\n'
+                      '        match crate::platform::elevate("") {\n'
+                      '            Ok(true) => {\n'
+                      '                // 提权实例已启动，退出当前未提权进程\n'
+                      '                std::process::exit(0);\n'
+                      '            }\n'
+                      '            Ok(false) => log::warn!("run as admin cancelled by user"),\n'
+                      '            Err(e) => log::warn!("run as admin failed: {e}"),\n'
+                      '        }\n'
                       '    }\n\n')
             if anchor in s:
                 s = s.replace(anchor, anchor + method, 1)
                 s = s.replace("        fn get_id();\n",
-                              "        fn get_id();\n        fn rdgen_copy_text(String);\n", 1)
+                              "        fn get_id();\n"
+                              "        fn rdgen_copy_text(String);\n"
+                              "        fn rdgen_is_elevated();\n"
+                              "        fn rdgen_run_as_admin();\n", 1)
                 write(p, s)
                 print("[ok] src/ui.rs: 新增 handler.rdgen_copy_text")
             else:
@@ -572,8 +601,9 @@ def patch_copy_credentials() -> None:
     if anchor_markup not in s or anchor_handler not in s:
         print("[warn] src/ui/index.tis: 锚点没找到，按钮未插入")
         return
-    s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP, 1)
-    s = s.replace(anchor_handler, "\n" + RG_COPY_HANDLER + "function updatePasswordArea() {", 1)
+    s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP + RG_ADMIN_MARKUP, 1)
+    s = s.replace(anchor_handler,
+                  "\n" + RG_COPY_HANDLER + RG_ADMIN_HANDLER + "function updatePasswordArea() {", 1)
     write(p, s)
     print("[ok] src/ui/index.tis: 已加入复制 ID 和密码按钮")
 

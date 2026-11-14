@@ -483,28 +483,17 @@ def patch_no_install_tip() -> None:
 JS_PWD = "\\u5bc6\\u7801:  "
 
 RG_TIP_FUNC = ('var rdgen_tip_deadline = 0;\n'
-              'var rdgen_tip_seq = 0;\n'
               'function rdgen_tip_hide() {\n'
               '    rdgen_tip_deadline = 0;\n'
-              '    var el = $(div#rdgen-tip);\n'
+              '    var el = $(#rdgen-tip);\n'
               '    if (el) el.style.set { display: "none" };\n'
               '}\n'
               'function rdgen_tip(text) {\n'
-              '    var el = $(div#rdgen-tip);\n'
-              '    if (!el) {\n'
-              '        el = <div #rdgen-tip style="position:absolute; left:50%; margin-left:-116px; '
-              'bottom:96px; width:232px; padding:9px 6px; border-radius:6px; background:#2b2b2b; '
-              'color:#ffffff; font-size:0.9em; text-align:center; z-index:99; display:none;"></div>;\n'
-              '        self.append(el);\n'
-              '    }\n'
+              '    rdgen_tip_deadline = Date.now() + 2000;\n'
+              '    var el = $(#rdgen-tip);\n'
+              '    if (!el) return;\n'
               '    el.text = text;\n'
               '    el.style.set { display: "block" };\n'
-              '    rdgen_tip_deadline = Date.now() + 2000;\n'
-              '    rdgen_tip_seq = rdgen_tip_seq + 1;\n'
-              '    var my = rdgen_tip_seq;\n'
-              '    self.timer(2s, function() {\n'
-              '        if (my == rdgen_tip_seq) rdgen_tip_hide();\n'
-              '    });\n'
               '}\n'
               'function rdgen_tip_tick() {\n'
               '    if (!rdgen_tip_deadline) return;\n'
@@ -512,6 +501,10 @@ RG_TIP_FUNC = ('var rdgen_tip_deadline = 0;\n'
               '    rdgen_tip_hide();\n'
               '}\n\n')
 
+RG_TIP_MARKUP = ('                        <div #rdgen-tip style="display:none; position:absolute; '
+                 'left:12px; right:12px; bottom:44px; padding:9px 6px; border-radius:6px; '
+                 'background:#2b2b2b; color:#ffffff; font-size:0.9em; text-align:center; '
+                 'z-index:99;"></div>\n')
 RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 16px 0 10px 0">'
                   '<button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
@@ -555,8 +548,8 @@ RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_insta
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
 
 RG_ADMIN_HANDLER = ('event click $(button#rdgen-run-as-admin) {\n'
-                    '    rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
                     '    handler.rdgen_run_as_admin();\n'
+                    '    rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
                     '}\n\n')
 
 
@@ -651,7 +644,8 @@ def patch_copy_credentials() -> None:
     if anchor_markup not in s or anchor_handler not in s:
         print("[warn] src/ui/index.tis: 锚点没找到，按钮未插入")
         return
-    s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP + RG_ADMIN_MARKUP, 1)
+    s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP + RG_ADMIN_MARKUP
+                  + RG_TIP_MARKUP, 1)
     s = s.replace("""    self.timer(1s, function() {
         var temporary_password = handler.temporary_password();""",
                   """    self.timer(1s, function() {

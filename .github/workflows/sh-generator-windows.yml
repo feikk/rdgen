@@ -584,6 +584,13 @@ jobs:
             Write-Host "Error: printer-adapter folder not found in repository."
           }
 
+
+      - name: copy credentials button (flutter)
+        continue-on-error: true
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-copy-credentials
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk

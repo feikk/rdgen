@@ -10,6 +10,7 @@
     python rdgen_patch.py brand             # sciter 客户端：去掉「由 xxx 提供支持」并在原位居中放自定义图标
     python rdgen_patch.py no-install-tip    # sciter 客户端：去掉「你正在运行未安装版本…」粉色提示
     python rdgen_patch.py copy-credentials  # sciter 客户端：左栏下方加「复制 ID 和密码」按钮
+    python rdgen_patch.py flutter-copy-credentials  # flutter 客户端：同上（只改 dart）
 两者都幂等，重复执行不会破坏文件。
 """
 import os
@@ -479,9 +480,42 @@ def patch_no_install_tip() -> None:
 
 JS_PWD = "\\u5bc6\\u7801:  "
 
-RG_COPY_MARKUP = ('                        {incoming_only ? <div style="padding: 16px 0 10px 0">'
-                  '<button #rdgen-copy-credentials .button style="width:*; height:38px; font-size:1.05em">'
+RG_COPY_MARKUP = ('                        {!outgoing_only ? <div style="padding: 16px 0 10px 0">'
+                  '<button #rdgen-copy-credentials .button style="width:*; height:38px; font-size:1em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
+
+RG_FLUTTER_METHOD = """
+  Widget buildRdgenCopyButton() {
+    return ChangeNotifierProvider.value(
+      value: gFFI.serverModel,
+      child: Consumer<ServerModel>(
+        builder: (context, model, child) {
+          return Padding(
+            padding: const EdgeInsets.only(left: 20.0, right: 16, bottom: 10),
+            child: SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: OutlinedButton(
+                onPressed: () {
+                  final id = model.serverId.text;
+                  final pwd = model.serverPasswd.text;
+                  var text = 'ID: ' + id;
+                  if (pwd.isNotEmpty && pwd != '-') {
+                    text = text + '\\n密码: ' + pwd;
+                  }
+                  Clipboard.setData(ClipboardData(text: text));
+                  showToast('已复制');
+                },
+                child: Text('复制 ID 和密码', style: TextStyle(fontSize: 14)),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+"""
 
 RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
                    '    var rg_id = get_id();\n'
@@ -543,6 +577,30 @@ def patch_copy_credentials() -> None:
     write(p, s)
     print("[ok] src/ui/index.tis: 已加入复制 ID 和密码按钮")
 
+    patch_flutter_copy_button()
+
+
+def patch_flutter_copy_button() -> None:
+    """flutter 客户端（64 位标准端）左栏加「复制 ID 和密码」按钮。"""
+    p = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 desktop_home_page.dart，跳过 flutter 复制按钮")
+        return
+    s = read(p)
+    if "buildRdgenCopyButton" in s:
+        print("[skip] desktop_home_page.dart: 复制按钮已存在")
+        return
+    anchor_call = "      if (!isOutgoingOnly) buildPasswordBoard(context),\n"
+    anchor_method = "\n  buildPasswordBoard(BuildContext context) {"
+    if anchor_call not in s or anchor_method not in s:
+        print("[warn] desktop_home_page.dart: 锚点没找到，按钮未插入")
+        return
+    s = s.replace(anchor_call,
+                  anchor_call + "      if (!isOutgoingOnly) buildRdgenCopyButton(),\n", 1)
+    s = s.replace(anchor_method, "\n" + RG_FLUTTER_METHOD + "  buildPasswordBoard(BuildContext context) {", 1)
+    write(p, s)
+    print("[ok] desktop_home_page.dart: 已加入复制 ID 和密码按钮")
+
 
 def patch_inline_sciter_encoding() -> None:
     """res/inline-sciter.py 默认用系统编码(cp1252)读 src/ui/*.tis。
@@ -590,6 +648,8 @@ def main() -> None:
         patch_brand()
     elif action == "copy-credentials":
         patch_copy_credentials()
+    elif action == "flutter-copy-credentials":
+        patch_flutter_copy_button()
     elif action == "no-install-tip":
         patch_no_install_tip()
     elif action == "incoming-width":

@@ -757,6 +757,82 @@ def patch_sciter_permissions() -> None:
     write(p, s)
     print("[ok] connection.rs: 32 位构建也按 access-mode 决定权限")
 
+    patch_access_mode_expand()
+
+
+def patch_access_mode_expand() -> None:
+    """把 access-mode 展开成逐项权限开关。
+
+    sciter 设置面板的勾选读的是 enable-* / allow-remote-config-modification 这些逐项
+    option（get_option(id) != "N"），只看 access-mode 会导致「运行时有权限、界面全不勾」。
+    这里在读完自定义客户端配置后，按 access-mode 把逐项开关写成 Y/N，界面与判定一致。
+    """
+    p = "src/common.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/common.rs，跳过")
+        return
+    s = read(p)
+    if "rdgen: access-mode" in s:
+        print("[skip] src/common.rs: access-mode 展开补丁已存在")
+        return
+    anchor = """    for (k, v) in data {
+        if let Some(v) = v.as_str() {
+            config::HARD_SETTINGS
+                .write()
+                .unwrap()
+                .insert(k, v.to_owned());
+        };
+    }
+}"""
+    if anchor not in s:
+        print("[warn] src/common.rs: 锚点没找到，未展开 access-mode")
+        return
+    code = """    for (k, v) in data {
+        if let Some(v) = v.as_str() {
+            config::HARD_SETTINGS
+                .write()
+                .unwrap()
+                .insert(k, v.to_owned());
+        };
+    }
+    // rdgen: access-mode 展开到逐项开关（sciter 的界面勾选/远程修改配置都读这些键）
+    let access_mode = {
+        let d = config::DEFAULT_SETTINGS.read().unwrap();
+        let o = config::OVERWRITE_SETTINGS.read().unwrap();
+        o.get("access-mode")
+            .or_else(|| d.get("access-mode"))
+            .cloned()
+            .unwrap_or_default()
+    };
+    if access_mode == "full" || access_mode == "view" {
+        let v = if access_mode == "full" { "Y" } else { "N" }.to_owned();
+        let perm_keys = [
+            "enable-keyboard",
+            "enable-clipboard",
+            "enable-file-transfer",
+            "enable-camera",
+            "enable-terminal",
+            "enable-remote-restart",
+            "enable-tunnel",
+            "enable-block-input",
+            "enable-privacy-mode",
+            "enable-lan-discovery",
+            "enable-remote-printer",
+            "enable-audio",
+            "allow-remote-config-modification",
+        ];
+        let mut d = config::DEFAULT_SETTINGS.write().unwrap();
+        let mut o = config::OVERWRITE_SETTINGS.write().unwrap();
+        for k in perm_keys {
+            d.insert(k.to_owned(), v.clone());
+            o.insert(k.to_owned(), v.clone());
+        }
+    }
+}"""
+    s = s.replace(anchor, code, 1)
+    write(p, s)
+    print("[ok] src/common.rs: access-mode 已展开到逐项权限开关")
+
 
 def main() -> None:
     if len(sys.argv) < 2:

@@ -517,7 +517,7 @@ RG_FLUTTER_METHOD = """
 
 """
 
-RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.rdgen_is_elevated() ? '
+RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() ? '
                   '<div style="padding: 0 0 10px 0"><button #rdgen-run-as-admin .button '
                   'style="width:*; height:34px; font-size:1em">'
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
@@ -560,17 +560,27 @@ def patch_copy_credentials() -> None:
                       '        crate::platform::is_elevated(None).unwrap_or(false)\n'
                       '    }\n\n'
                       '    fn rdgen_run_as_admin(&self) {\n'
-                      '        if crate::platform::is_elevated(None).unwrap_or(false) {\n'
-                      '            return;\n'
-                      '        }\n'
-                      '        match crate::platform::elevate("") {\n'
-                      '            Ok(true) => {\n'
-                      '                // 提权实例已启动，退出当前未提权进程\n'
-                      '                std::process::exit(0);\n'
+                      '        std::thread::spawn(|| {\n'
+                      '            // 与 pre-elevate-service=Y 同一逻辑：只把便携服务以管理员身份拉起（弹 UAC），\n'
+                      '            // 界面进程不重启，提权后的服务接管采集/输入，可以操作 UAC 级窗口。\n'
+                      '            let _ = hbb_common::config::LocalConfig::set_option(\n'
+                      '                "pre-elevate-service".to_owned(),\n'
+                      '                "Y".to_owned(),\n'
+                      '            );\n'
+                      '            crate::portable_service::client::set_quick_support(true);\n'
+                      '            if crate::portable_service::client::running() {\n'
+                      '                // 已有非提权助手在运行，无法原地升级，只能退回整进程重启提权\n'
+                      '                if let Ok(true) = crate::platform::elevate("") {\n'
+                      '                    std::process::exit(0);\n'
+                      '                }\n'
+                      '                return;\n'
                       '            }\n'
-                      '            Ok(false) => log::warn!("run as admin cancelled by user"),\n'
-                      '            Err(e) => log::warn!("run as admin failed: {e}"),\n'
-                      '        }\n'
+                      '            if let Err(e) = crate::portable_service::client::start_portable_service(\n'
+                      '                crate::portable_service::client::StartPara::Direct,\n'
+                      '            ) {\n'
+                      '                log::warn!("start elevated portable service failed: {e}");\n'
+                      '            }\n'
+                      '        });\n'
                       '    }\n\n')
             if anchor in s:
                 s = s.replace(anchor, anchor + method, 1)
@@ -667,6 +677,43 @@ def open(path, mode="r", *args, **kwargs):
 
 
 
+def patch_ps_elevate_launch() -> None:
+    """便携服务（quick support 的采集/输入助手）默认用 run_background 静默拉起。
+
+    这里让它在 pre-elevate-service=Y 且当前未提权时改用 runas(ShellExecuteW)，
+    UAC 授权后助手进程以管理员身份运行，而界面进程保持原样（不重启）。
+    """
+    p = "src/server/portable_service.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/server/portable_service.rs，跳过")
+        return
+    s = read(p)
+    if "rdgen_launch_portable_service" in s:
+        print("[skip] portable_service.rs: 提权拉起补丁已存在")
+        return
+    anchor_call = "                    match crate::platform::run_background("
+    anchor_import = "use super::video_qos;\n"
+    if anchor_call not in s or anchor_import not in s:
+        print("[warn] portable_service.rs: 锚点没找到，未修改")
+        return
+    helper = ("\n"
+              "// rdgen: 仅在 pre-elevate-service=Y 且尚未提权时使用 runas 拉起便携服务（会弹 UAC），\n"
+              "// 其它情况保持上游的静默 run_background 行为。\n"
+              "fn rdgen_launch_portable_service(exe: &str, arg: &str) -> ResultType<bool> {\n"
+              "    if hbb_common::config::LocalConfig::get_option(\"pre-elevate-service\") == \"Y\"\n"
+              "        && !crate::platform::is_elevated(None).unwrap_or(false)\n"
+              "    {\n"
+              "        crate::platform::run_uac(exe, arg)\n"
+              "    } else {\n"
+              "        crate::platform::run_background(exe, arg)\n"
+              "    }\n"
+              "}\n")
+    s = s.replace(anchor_import, anchor_import + helper, 1)
+    s = s.replace(anchor_call, "                    match rdgen_launch_portable_service(", 1)
+    write(p, s)
+    print("[ok] portable_service.rs: pre-elevate-service=Y 时以 runas 拉起便携服务")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -680,6 +727,8 @@ def main() -> None:
         patch_copy_credentials()
     elif action == "flutter-copy-credentials":
         patch_flutter_copy_button()
+    elif action == "run-as-admin":
+        patch_ps_elevate_launch()
     elif action == "no-install-tip":
         patch_no_install_tip()
     elif action == "incoming-width":

@@ -480,7 +480,7 @@ def patch_no_install_tip() -> None:
 
 JS_PWD = "\\u5bc6\\u7801:  "
 
-RG_COPY_MARKUP = ('                        {!outgoing_only ? <div style="padding: 16px 0 10px 0">'
+RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 16px 0 10px 0">'
                   '<button #rdgen-copy-credentials .button style="width:*; height:38px; font-size:1em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
 
@@ -517,7 +517,7 @@ RG_FLUTTER_METHOD = """
 
 """
 
-RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() ? '
+RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() && handler.get_builtin_option("prebtn") == "Y" ? '
                   '<div style="padding: 0 0 10px 0"><button #rdgen-run-as-admin .button '
                   'style="width:*; height:34px; font-size:1em">'
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
@@ -642,7 +642,7 @@ def patch_flutter_copy_button() -> None:
         print("[warn] desktop_home_page.dart: 锚点没找到，按钮未插入")
         return
     s = s.replace(anchor_call,
-                  anchor_call + "      if (!isOutgoingOnly) buildRdgenCopyButton(),\n", 1)
+                  anchor_call + "      if (!isOutgoingOnly && bind.mainGetBuildinOption('copybtn') == 'Y') buildRdgenCopyButton(),\n", 1)
     s = s.replace(anchor_method, "\n" + RG_FLUTTER_METHOD + "  buildPasswordBoard(BuildContext context) {", 1)
     write(p, s)
     print("[ok] desktop_home_page.dart: 已加入复制 ID 和密码按钮")

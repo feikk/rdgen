@@ -25,11 +25,16 @@ except Exception:
     pass
 
 def read(path: str) -> str:
+    """读入并统一成 LF。
+
+    Windows runner 上 actions/checkout 拉下来的源码是 CRLF，锚点里写的 "\n"
+    会因为多出来的 "\r" 匹配不上（曾经导致 ui.rs / inline-sciter.py 的补丁静默跳过）。
+    """
     with open(path, "r", encoding="utf-8", newline="") as f:
-        return f.read()
+        return f.read().replace("\r\n", "\n").replace("\r", "\n")
 
 def write(path: str, content: str) -> None:
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
 
 def patch_peer_card() -> None:

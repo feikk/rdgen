@@ -711,7 +711,7 @@ def patch_flutter_copy_button() -> None:
         print("[warn] desktop_home_page.dart: 锚点没找到，按钮未插入")
         return
     s = s.replace(anchor_call,
-                  anchor_call + "      if (!isOutgoingOnly && bind.mainGetBuildinOption('copybtn') == 'Y') buildRdgenCopyButton(),\n", 1)
+                  anchor_call + "      if (!isOutgoingOnly && bind.mainGetBuildinOption(key: 'copybtn') == 'Y') buildRdgenCopyButton(),\n", 1)
     s = s.replace(anchor_method, "\n" + RG_FLUTTER_METHOD + "  buildPasswordBoard(BuildContext context) {", 1)
     write(p, s)
     print("[ok] desktop_home_page.dart: 已加入复制 ID 和密码按钮")
@@ -719,7 +719,7 @@ def patch_flutter_copy_button() -> None:
 
 RG_FLUTTER_ADMIN_METHOD = """
   Widget buildRdgenRunAsAdminButton() {
-    if (bind.mainGetBuildinOption('prebtn') != 'Y') return SizedBox();
+    if (bind.mainGetBuildinOption(key: 'prebtn') != 'Y') return SizedBox();
     if (bind.mainIsInstalled()) return SizedBox();
     if (bind.rdgenIsElevated()) return SizedBox();
     return Padding(
@@ -748,50 +748,81 @@ RG_FLUTTER_FFI_ANCHOR = """pub fn main_get_buildin_option(key: String) -> SyncRe
 
 RG_FLUTTER_FFI_CODE = """
 
-#[cfg(target_os = "windows")]
 #[inline]
 pub fn rdgen_is_elevated() -> SyncReturn<bool> {
-    // rdgen: 顺带清掉历史版本写进本地配置的 pre-elevate-service=Y，
-    // 避免每次启动都被拉起便携服务而弹 UAC
-    std::sync::Once::new().call_once(|| {
-        if hbb_common::config::LocalConfig::get_option("pre-elevate-service") == "Y" {
-            let _ = hbb_common::config::LocalConfig::set_option(
-                "pre-elevate-service".to_owned(),
-                String::new(),
-            );
-        }
-    });
-    SyncReturn(crate::platform::is_elevated(None).unwrap_or(false))
+    #[cfg(target_os = "windows")]
+    {
+        // rdgen: 顺带清掉历史版本写进本地配置的 pre-elevate-service=Y，
+        // 避免每次启动都被拉起便携服务而弹 UAC
+        std::sync::Once::new().call_once(|| {
+            if hbb_common::config::LocalConfig::get_option("pre-elevate-service") == "Y" {
+                let _ = hbb_common::config::LocalConfig::set_option(
+                    "pre-elevate-service".to_owned(),
+                    String::new(),
+                );
+            }
+        });
+        SyncReturn(crate::platform::is_elevated(None).unwrap_or(false))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        SyncReturn(false)
+    }
 }
 
-#[cfg(target_os = "windows")]
 pub fn rdgen_run_as_admin() {
-    std::thread::spawn(|| {
-        // 只把便携服务以管理员身份拉起（弹 UAC），界面进程不重启；
-        // 一次性开关，下次正常启动不会弹窗
-        crate::portable_service::set_rdgen_elevate_once(true);
-        crate::portable_service::client::set_quick_support(true);
-        if crate::portable_service::client::running() {
-            if let Ok(true) = crate::platform::elevate("") {
-                std::process::exit(0);
-            }
-            return;
-        }
-        match crate::portable_service::client::start_portable_service(
-            crate::portable_service::client::StartPara::Direct,
-        ) {
-            Ok(()) => {}
-            Err(e) => {
-                // 便携服务起不来时兜底：整进程以管理员身份重启
-                log::warn!("rdgen: start elevated portable service failed: {e}");
+    #[cfg(target_os = "windows")]
+    {
+        std::thread::spawn(|| {
+            // 只把便携服务以管理员身份拉起（弹 UAC），界面进程不重启；
+            // 一次性开关，下次正常启动不会弹窗
+            crate::portable_service::set_rdgen_elevate_once(true);
+            crate::portable_service::client::set_quick_support(true);
+            if crate::portable_service::client::running() {
                 if let Ok(true) = crate::platform::elevate("") {
                     std::process::exit(0);
                 }
+                return;
             }
-        }
-    });
+            match crate::portable_service::client::start_portable_service(
+                crate::portable_service::client::StartPara::Direct,
+            ) {
+                Ok(()) => {}
+                Err(e) => {
+                    // 便携服务起不来时兜底：整进程以管理员身份重启
+                    log::warn!("rdgen: start elevated portable service failed: {e}");
+                    if let Ok(true) = crate::platform::elevate("") {
+                        std::process::exit(0);
+                    }
+                }
+            }
+        });
+    }
 }
 """
+
+
+def patch_flutter_ffi_only() -> None:
+    """只给 src/flutter_ffi.rs 加提权接口，供 bridge 生成任务（Linux）使用。
+
+    dart 侧的 bind.rdgenIsElevated / bind.rdgenRunAsAdmin 是由 flutter_rust_bridge
+    按 flutter_ffi.rs 生成的，生成任务在 Ubuntu 上跑，所以必须在它 checkout 完源码、
+    生成绑定之前把这两个函数补进去，Windows 构建任务再恢复同一份绑定。
+    """
+    p = "src/flutter_ffi.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/flutter_ffi.rs，跳过")
+        return
+    s = read(p)
+    if "rdgen_run_as_admin" in s:
+        print("[skip] src/flutter_ffi.rs: 提权接口已存在")
+        return
+    if RG_FLUTTER_FFI_ANCHOR not in s:
+        print("[warn] src/flutter_ffi.rs: 锚点没找到，未加提权接口")
+        return
+    s = s.replace(RG_FLUTTER_FFI_ANCHOR, RG_FLUTTER_FFI_ANCHOR + RG_FLUTTER_FFI_CODE, 1)
+    write(p, s)
+    print("[ok] src/flutter_ffi.rs: 新增 rdgen_is_elevated / rdgen_run_as_admin")
 
 
 def patch_flutter_run_as_admin() -> None:
@@ -826,7 +857,7 @@ def patch_flutter_run_as_admin() -> None:
     if "buildRdgenRunAsAdminButton" in s:
         print("[skip] desktop_home_page.dart: 管理员按钮已存在")
         return
-    call_anchor = ("      if (!isOutgoingOnly && bind.mainGetBuildinOption('copybtn') == 'Y')"
+    call_anchor = ("      if (!isOutgoingOnly && bind.mainGetBuildinOption(key: 'copybtn') == 'Y')"
                    " buildRdgenCopyButton(),\n")
     method_anchor = "\n  buildPasswordBoard(BuildContext context) {"
     if call_anchor not in s or method_anchor not in s:
@@ -1035,6 +1066,8 @@ def main() -> None:
         patch_brand()
     elif action == "copy-credentials":
         patch_copy_credentials()
+    elif action == "flutter-ffi":
+        patch_flutter_ffi_only()
     elif action == "flutter-copy-credentials":
         patch_flutter_copy_button()
         patch_flutter_run_as_admin()

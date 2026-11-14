@@ -45,6 +45,12 @@ jobs:
           repository: rustdesk/rustdesk
           submodules: recursive
 
+      - name: Apply rdgen flutter ffi patch
+        continue-on-error: true
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-ffi
       - name: Install prerequisites
         run: |
           sudo apt-get install ca-certificates -y

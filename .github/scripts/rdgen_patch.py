@@ -573,11 +573,8 @@ RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_insta
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
 
 RG_ADMIN_HANDLER = ('event click $(button#rdgen-run-as-admin) {\n'
-                    '    var rg_st = handler.rdgen_run_as_admin();\n'
-                    '    if (rg_st == "ask")\n'
-                    '        rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
-                    '    else\n'
-                    '        rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743\\uFF08" + rg_st + "\\uFF09");\n'
+                    '    handler.rdgen_run_as_admin();\n'
+                    '    rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
                     '}\n\n')
 
 
@@ -623,24 +620,23 @@ def patch_copy_credentials() -> None:
                       '        });\n'
                       '        crate::platform::is_elevated(None).unwrap_or(false)\n'
                       '    }\n\n'
-                      '    fn rdgen_run_as_admin(&self) -> String {\n'
+                      '    fn rdgen_run_as_admin(&self) {\n'
                       '        use crate::portable_service::client;\n'
+                      '        // 一次性开关：只在这次按钮触发的启动里以管理员身份拉起便携服务\n'
                       '        crate::portable_service::set_rdgen_elevate_once(true);\n'
                       '        client::set_quick_support(true);\n'
-                      '        if client::running() {\n'
-                      '            // 已有非提权助手在运行，无法原地升级，只能整进程提权重启\n'
-                      '            std::thread::spawn(|| {\n'
+                      '        std::thread::spawn(|| {\n'
+                      '            if client::running() {\n'
+                      '                // 已有助手在跑，无法原地升级 -> 整进程提权重启（会弹 UAC）\n'
                       '                if let Ok(true) = crate::platform::elevate("") {\n'
                       '                    std::process::exit(0);\n'
                       '                }\n'
-                      '            });\n'
-                      '            return "restart".to_owned();\n'
-                      '        }\n'
-                      '        std::thread::spawn(|| {\n'
+                      '                return;\n'
+                      '            }\n'
                       '            match client::start_portable_service(client::StartPara::Direct) {\n'
                       '                Ok(()) => {}\n'
                       '                Err(e) => {\n'
-                      '                    // 便携服务起不来时兜底：整进程以管理员身份重启，保证按钮有效\n'
+                      '                    // 便携服务起不来（already running / 抓屏失败等）兜底：整进程提权重启\n'
                       '                    log::warn!("rdgen: start elevated portable service failed: {e}");\n'
                       '                    if let Ok(true) = crate::platform::elevate("") {\n'
                       '                        std::process::exit(0);\n'
@@ -648,7 +644,6 @@ def patch_copy_credentials() -> None:
                       '                }\n'
                       '            }\n'
                       '        });\n'
-                      '        "ask".to_owned()\n'
                       '    }\n\n')
             if anchor in s:
                 s = s.replace(anchor, anchor + method, 1)
@@ -656,7 +651,7 @@ def patch_copy_credentials() -> None:
                               "        fn get_id();\n"
                               "        fn rdgen_copy_text(String);\n"
                               "        fn rdgen_is_elevated();\n"
-                              "        fn rdgen_run_as_admin() -> String;\n", 1)
+                              "        fn rdgen_run_as_admin();\n", 1)
                 write(p, s)
                 print("[ok] src/ui.rs: 新增 handler.rdgen_copy_text")
             else:

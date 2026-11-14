@@ -445,6 +445,29 @@ def patch_incoming_width() -> None:
 
 
 
+def patch_help_card_css() -> None:
+    """帮助卡片（粉色安装提示）往上收一点，别离上面的内容太远。"""
+    p = "src/ui/index.css"
+    if not os.path.exists(p):
+        print("[info] 没有 src/ui/index.css，跳过")
+        return
+    s = read(p)
+    if "rdgen: 帮助卡片上移" in s:
+        print("[skip] src/ui/index.css: 帮助卡片间距已调整")
+        return
+    old = "div.install-me, div.trust-me {\n    margin-top: 0.5em;\n    padding: 20px;"
+    new = ("div.install-me, div.trust-me {\n"
+           "    /* rdgen: 帮助卡片上移，靠近上方内容 */\n"
+           "    margin-top: -1em;\n"
+           "    padding: 10px 20px 16px 20px;")
+    if old not in s:
+        print("[warn] src/ui/index.css: 没找到 install-me 规则，未调整")
+        return
+    s = s.replace(old, new, 1)
+    write(p, s)
+    print("[ok] src/ui/index.css: 帮助卡片上移（margin-top -1em，padding-top 10px）")
+
+
 def patch_no_install_tip() -> None:
     """sciter 客户端：去掉「你正在运行未安装版本…」那块粉色安装提示。
 
@@ -468,6 +491,8 @@ def patch_no_install_tip() -> None:
         print("[ok] src/ui/index.tis: 帮助提示默认显示，hide-help-cards=Y 时隐藏")
     else:
         print("[skip] src/ui/index.tis: 帮助提示条件已是目标状态或源码结构变了")
+
+    patch_help_card_css()
 
     try:
         h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "350").strip())
@@ -548,8 +573,11 @@ RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_insta
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
 
 RG_ADMIN_HANDLER = ('event click $(button#rdgen-run-as-admin) {\n'
-                    '    handler.rdgen_run_as_admin();\n'
-                    '    rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
+                    '    var rg_st = handler.rdgen_run_as_admin();\n'
+                    '    if (rg_st == "ask")\n'
+                    '        rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743");\n'
+                    '    else\n'
+                    '        rdgen_tip("\\u8bf7\\u70b9\\u51fb\\u201c\\u662f\\u201d\\u6388\\u6743\\uFF08" + rg_st + "\\uFF09");\n'
                     '}\n\n')
 
 
@@ -595,25 +623,32 @@ def patch_copy_credentials() -> None:
                       '        });\n'
                       '        crate::platform::is_elevated(None).unwrap_or(false)\n'
                       '    }\n\n'
-                      '    fn rdgen_run_as_admin(&self) {\n'
-                      '        std::thread::spawn(|| {\n'
-                      '            // 只把便携服务以管理员身份拉起（弹 UAC），界面进程不重启；\n'
-                      '            // 一次性开关，下次正常启动不会弹窗。\n'
-                      '            crate::portable_service::set_rdgen_elevate_once(true);\n'
-                      '            crate::portable_service::client::set_quick_support(true);\n'
-                      '            if crate::portable_service::client::running() {\n'
-                      '                // 已有非提权助手在运行，无法原地升级，只能退回整进程重启提权\n'
+                      '    fn rdgen_run_as_admin(&self) -> String {\n'
+                      '        use crate::portable_service::client;\n'
+                      '        crate::portable_service::set_rdgen_elevate_once(true);\n'
+                      '        client::set_quick_support(true);\n'
+                      '        if client::running() {\n'
+                      '            // 已有非提权助手在运行，无法原地升级，只能整进程提权重启\n'
+                      '            std::thread::spawn(|| {\n'
                       '                if let Ok(true) = crate::platform::elevate("") {\n'
                       '                    std::process::exit(0);\n'
                       '                }\n'
-                      '                return;\n'
-                      '            }\n'
-                      '            if let Err(e) = crate::portable_service::client::start_portable_service(\n'
-                      '                crate::portable_service::client::StartPara::Direct,\n'
-                      '            ) {\n'
-                      '                log::warn!("start elevated portable service failed: {e}");\n'
+                      '            });\n'
+                      '            return "restart".to_owned();\n'
+                      '        }\n'
+                      '        std::thread::spawn(|| {\n'
+                      '            match client::start_portable_service(client::StartPara::Direct) {\n'
+                      '                Ok(()) => {}\n'
+                      '                Err(e) => {\n'
+                      '                    // 便携服务起不来时兜底：整进程以管理员身份重启，保证按钮有效\n'
+                      '                    log::warn!("rdgen: start elevated portable service failed: {e}");\n'
+                      '                    if let Ok(true) = crate::platform::elevate("") {\n'
+                      '                        std::process::exit(0);\n'
+                      '                    }\n'
+                      '                }\n'
                       '            }\n'
                       '        });\n'
+                      '        "ask".to_owned()\n'
                       '    }\n\n')
             if anchor in s:
                 s = s.replace(anchor, anchor + method, 1)
@@ -621,7 +656,7 @@ def patch_copy_credentials() -> None:
                               "        fn get_id();\n"
                               "        fn rdgen_copy_text(String);\n"
                               "        fn rdgen_is_elevated();\n"
-                              "        fn rdgen_run_as_admin();\n", 1)
+                              "        fn rdgen_run_as_admin() -> String;\n", 1)
                 write(p, s)
                 print("[ok] src/ui.rs: 新增 handler.rdgen_copy_text")
             else:
@@ -742,10 +777,17 @@ pub fn rdgen_run_as_admin() {
             }
             return;
         }
-        if let Err(e) = crate::portable_service::client::start_portable_service(
+        match crate::portable_service::client::start_portable_service(
             crate::portable_service::client::StartPara::Direct,
         ) {
-            log::warn!("start elevated portable service failed: {e}");
+            Ok(()) => {}
+            Err(e) => {
+                // 便携服务起不来时兜底：整进程以管理员身份重启
+                log::warn!("rdgen: start elevated portable service failed: {e}");
+                if let Ok(true) = crate::platform::elevate("") {
+                    std::process::exit(0);
+                }
+            }
         }
     });
 }

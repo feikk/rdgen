@@ -461,11 +461,13 @@ def patch_no_install_tip() -> None:
     before = s
 
     cond_old = '{(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}'
+    cond_new = ('{(!is_win || handler.is_installed() || disable_installation'
+                ' || handler.get_builtin_option("hide-help-cards") == "Y") ? "" : <InstallMe />}')
     if cond_old in s:
-        s = s.replace(cond_old, '{""}', 1)
-        print("[ok] src/ui/index.tis: 已隐藏未安装提示横幅")
+        s = s.replace(cond_old, cond_new, 1)
+        print("[ok] src/ui/index.tis: 帮助提示默认显示，hide-help-cards=Y 时隐藏")
     else:
-        print("[skip] src/ui/index.tis: 未安装提示横幅已隐藏或源码结构变了")
+        print("[skip] src/ui/index.tis: 帮助提示条件已是目标状态或源码结构变了")
 
     try:
         h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "350").strip())
@@ -480,14 +482,34 @@ def patch_no_install_tip() -> None:
 
 JS_PWD = "\\u5bc6\\u7801:  "
 
-RG_TIP_FUNC = ('function rdgen_tip(text) {\n'
-              '    var old = $(div#rdgen-tip);\n'
-              '    if (old) old.remove();\n'
-              '    var tip = <div #rdgen-tip style="position:absolute; left:50%; margin-left:-116px; '
+RG_TIP_FUNC = ('var rdgen_tip_deadline = 0;\n'
+              'var rdgen_tip_seq = 0;\n'
+              'function rdgen_tip_hide() {\n'
+              '    rdgen_tip_deadline = 0;\n'
+              '    var el = $(div#rdgen-tip);\n'
+              '    if (el) el.style.set { display: "none" };\n'
+              '}\n'
+              'function rdgen_tip(text) {\n'
+              '    var el = $(div#rdgen-tip);\n'
+              '    if (!el) {\n'
+              '        el = <div #rdgen-tip style="position:absolute; left:50%; margin-left:-116px; '
               'bottom:96px; width:232px; padding:9px 6px; border-radius:6px; background:#2b2b2b; '
-              'color:#ffffff; font-size:0.9em; text-align:center; z-index:99;">{text}</div>;\n'
-              '    self.append(tip);\n'
-              '    self.timer(2s, function() { tip.remove(); });\n'
+              'color:#ffffff; font-size:0.9em; text-align:center; z-index:99; display:none;"></div>;\n'
+              '        self.append(el);\n'
+              '    }\n'
+              '    el.text = text;\n'
+              '    el.style.set { display: "block" };\n'
+              '    rdgen_tip_deadline = Date.now() + 2000;\n'
+              '    rdgen_tip_seq = rdgen_tip_seq + 1;\n'
+              '    var my = rdgen_tip_seq;\n'
+              '    self.timer(2s, function() {\n'
+              '        if (my == rdgen_tip_seq) rdgen_tip_hide();\n'
+              '    });\n'
+              '}\n'
+              'function rdgen_tip_tick() {\n'
+              '    if (!rdgen_tip_deadline) return;\n'
+              '    if (Date.now() < rdgen_tip_deadline) return;\n'
+              '    rdgen_tip_hide();\n'
               '}\n\n')
 
 RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 16px 0 10px 0">'
@@ -630,6 +652,11 @@ def patch_copy_credentials() -> None:
         print("[warn] src/ui/index.tis: 锚点没找到，按钮未插入")
         return
     s = s.replace(anchor_markup, anchor_markup + RG_COPY_MARKUP + RG_ADMIN_MARKUP, 1)
+    s = s.replace("""    self.timer(1s, function() {
+        var temporary_password = handler.temporary_password();""",
+                  """    self.timer(1s, function() {
+        rdgen_tip_tick();
+        var temporary_password = handler.temporary_password();""", 1)
     s = s.replace(anchor_handler,
                   "\n" + RG_TIP_FUNC + RG_COPY_HANDLER + RG_ADMIN_HANDLER
                   + "function updatePasswordArea() {", 1)

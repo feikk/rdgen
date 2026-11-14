@@ -557,16 +557,22 @@ def patch_copy_credentials() -> None:
                       '        }\n'
                       '    }\n\n'
                       '    fn rdgen_is_elevated(&self) -> bool {\n'
+                      '        // 清掉历史版本写进配置的 pre-elevate-service=Y，避免每次启动都走便携服务\n'
+                      '        std::sync::Once::new().call_once(|| {\n'
+                      '            if hbb_common::config::LocalConfig::get_option("pre-elevate-service") == "Y" {\n'
+                      '                let _ = hbb_common::config::LocalConfig::set_option(\n'
+                      '                    "pre-elevate-service".to_owned(),\n'
+                      '                    String::new(),\n'
+                      '                );\n'
+                      '            }\n'
+                      '        });\n'
                       '        crate::platform::is_elevated(None).unwrap_or(false)\n'
                       '    }\n\n'
                       '    fn rdgen_run_as_admin(&self) {\n'
                       '        std::thread::spawn(|| {\n'
-                      '            // 与 pre-elevate-service=Y 同一逻辑：只把便携服务以管理员身份拉起（弹 UAC），\n'
-                      '            // 界面进程不重启，提权后的服务接管采集/输入，可以操作 UAC 级窗口。\n'
-                      '            let _ = hbb_common::config::LocalConfig::set_option(\n'
-                      '                "pre-elevate-service".to_owned(),\n'
-                      '                "Y".to_owned(),\n'
-                      '            );\n'
+                      '            // 只把便携服务以管理员身份拉起（弹 UAC），界面进程不重启；\n'
+                      '            // 一次性开关，下次正常启动不会弹窗。\n'
+                      '            crate::portable_service::set_rdgen_elevate_once(true);\n'
                       '            crate::portable_service::client::set_quick_support(true);\n'
                       '            if crate::portable_service::client::running() {\n'
                       '                // 已有非提权助手在运行，无法原地升级，只能退回整进程重启提权\n'
@@ -697,10 +703,16 @@ def patch_ps_elevate_launch() -> None:
         print("[warn] portable_service.rs: 锚点没找到，未修改")
         return
     helper = ("\n"
-              "// rdgen: 仅在 pre-elevate-service=Y 且尚未提权时使用 runas 拉起便携服务（会弹 UAC），\n"
-              "// 其它情况保持上游的静默 run_background 行为。\n"
+              "// rdgen: 只有用户点过「管理员权限运行」按钮（一次性开关）才用 runas 拉起便携服务，\n"
+              "// 平时保持上游的静默 run_background 行为，启动时不会弹 UAC。\n"
+              "static RDGEN_ELEVATE_ONCE: AtomicBool = AtomicBool::new(false);\n"
+              "\n"
+              "pub fn set_rdgen_elevate_once(v: bool) {\n"
+              "    RDGEN_ELEVATE_ONCE.store(v, Ordering::SeqCst);\n"
+              "}\n"
+              "\n"
               "fn rdgen_launch_portable_service(exe: &str, arg: &str) -> ResultType<bool> {\n"
-              "    if hbb_common::config::LocalConfig::get_option(\"pre-elevate-service\") == \"Y\"\n"
+              "    if RDGEN_ELEVATE_ONCE.swap(false, Ordering::SeqCst)\n"
               "        && !crate::platform::is_elevated(None).unwrap_or(false)\n"
               "    {\n"
               "        crate::platform::run_uac(exe, arg)\n"
@@ -711,7 +723,39 @@ def patch_ps_elevate_launch() -> None:
     s = s.replace(anchor_import, anchor_import + helper, 1)
     s = s.replace(anchor_call, "                    match rdgen_launch_portable_service(", 1)
     write(p, s)
-    print("[ok] portable_service.rs: pre-elevate-service=Y 时以 runas 拉起便携服务")
+    print("[ok] portable_service.rs: 按需以 runas 拉起便携服务（仅按钮触发）")
+
+
+def patch_sciter_permissions() -> None:
+    """sciter(32 位) 构建也要遵守 access-mode。
+
+    上游 is_permission_enabled_locally 里读 access-mode 的逻辑被 #[cfg(feature = "flutter")]
+    挡掉了，所以自定义客户端在 sciter 版会退回 enable-* 的默认值，表现为「只有可查看权限」；
+    flutter(64 位) 因为读到 access-mode=full 才是一切正常。
+    """
+    p = "src/server/connection.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/server/connection.rs，跳过")
+        return
+    s = read(p)
+    if "rdgen: sciter" in s:
+        print("[skip] connection.rs: access-mode 补丁已存在")
+        return
+    old = ('    pub fn is_permission_enabled_locally(enable_prefix_option: &str) -> bool {\n'
+           '        #[cfg(feature = "flutter")]\n'
+           '        #[cfg(not(any(target_os = "android", target_os = "ios")))]\n'
+           '        {\n')
+    new = ('    pub fn is_permission_enabled_locally(enable_prefix_option: &str) -> bool {\n'
+           '        // rdgen: sciter(32 位) 构建也遵守 access-mode，否则自定义客户端退回 enable-*\n'
+           '        // 默认值，表现为「只有可查看权限」\n'
+           '        #[cfg(not(any(target_os = "android", target_os = "ios")))]\n'
+           '        {\n')
+    if old not in s:
+        print("[warn] connection.rs: 锚点没找到，未修改")
+        return
+    s = s.replace(old, new, 1)
+    write(p, s)
+    print("[ok] connection.rs: 32 位构建也按 access-mode 决定权限")
 
 
 def main() -> None:
@@ -729,6 +773,8 @@ def main() -> None:
         patch_flutter_copy_button()
     elif action == "run-as-admin":
         patch_ps_elevate_launch()
+    elif action == "permissions":
+        patch_sciter_permissions()
     elif action == "no-install-tip":
         patch_no_install_tip()
     elif action == "incoming-width":

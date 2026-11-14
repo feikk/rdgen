@@ -503,6 +503,13 @@ jobs:
           curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
           python3 rdgen_patch.py run-as-admin
 
+      - name: permissions patch (sciter honours access-mode)
+        continue-on-error: true
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py permissions
+
       - name: brand (remove powered-by, center logo)
         continue-on-error: true
         shell: bash

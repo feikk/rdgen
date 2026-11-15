@@ -500,42 +500,27 @@ def patch_no_install_tip() -> None:
     except ValueError:
         h = 500
 
-    # 0) 帮助卡片是否真的会显示（和上面那条渲染条件保持一致）
-    if "rdgen_help_card" not in s:
-        marker = "const incoming_only_width = "
-        idx = s.find(marker)
-        if idx >= 0:
-            eol = s.find("\n", idx)
-            s = s[:eol + 1] + (
-                "const rdgen_help_card = (!is_win || handler.is_installed() || disable_installation"
-                " || handler.get_builtin_option(\"hide-help-cards\") == \"Y\") ? false : true;\n"
-            ) + s[eol + 1:]
-            print("[ok] src/ui/index.tis: rdgen_help_card = %s" % "on demand")
-
-    # 1) 最小窗口高度：有帮助卡片时用 h，否则保持官方 300/390
-    if "rdgen: help card height" not in s:
+    # 1) 最小窗口高度（官方 is_installed() ? 300 : 390）——不论帮助卡片是否显示都用 h
+    if "rdgen: window height" not in s:
         s, nh = re.subn(r"\(handler\.is_installed\(\) \|\| disable_installation\) \? 300 : (?:300|390)",
-                        "(rdgen_help_card ? %d : ((handler.is_installed() || disable_installation) ? 300 : 390))"
-                        " /* rdgen: help card height */" % h,
+                        "(handler.is_installed() || disable_installation) ? %d : %d) /* rdgen: window height */" % (h, h),
                         s, count=1)
         if nh:
-            print("[ok] src/ui/index.tis: incoming-only min height -> help card ? %d : 300/390" % h)
+            print("[ok] src/ui/index.tis: incoming-only min/height -> %d" % h)
 
-    # 2) 首次打开时的居中尺寸
-    s, nc = re.subn(r"scaleIt\(incoming_only \? (?:\d+|rdgen\w+)( : 600\)\))",
-                    lambda m: "scaleIt(incoming_only ? (rdgen_help_card ? %d : 390)" % h + m.group(1),
-                    s, count=1)
+    # 2) 首次打开时的居中尺寸（centerize(... scaleIt(incoming_only ? 390 : 600))）
+    s, nc = re.subn(r"scaleIt\(incoming_only \? (?:\d+|\(?rdgen\w+ ?\? \d+ : \d+\)) : 600\)\)",
+                    "scaleIt(incoming_only ? %d : 600))" % h, s, count=1)
     if nc:
-        print("[ok] src/ui/index.tis: incoming-only initial height -> help card ? %d : 390" % h)
+        print("[ok] src/ui/index.tis: incoming-only initial height -> %d" % h)
 
-    # 3) 恢复上次保存的尺寸时，只有在帮助卡片会显示时才抬到 h
+    # 3) 恢复上次保存的窗口尺寸时抬到 h（老用户本地存的是旧高度）
     if "rdgen: force min height" not in s:
         anchor = "    if (isReasonableSize(r) && r[2] > 0) {\n"
         if anchor in s:
             s = s.replace(anchor, anchor
-                          + "        if (incoming_only && rdgen_help_card && r[3] < %d) r[3] = %d; // rdgen: force min height\n"
-                          % (h, h), 1)
-            print("[ok] src/ui/index.tis: clamp restored height -> %d (only with help card)" % h)
+                          + "        if (incoming_only && r[3] < %d) r[3] = %d; // rdgen: force min height\n" % (h, h), 1)
+            print("[ok] src/ui/index.tis: clamp restored window height -> %d" % h)
         else:
             print("[warn] src/ui/index.tis: 没找到 self.ready 的尺寸判断，跳过高度钳制")
 

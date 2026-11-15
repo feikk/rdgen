@@ -446,7 +446,7 @@ def patch_incoming_width() -> None:
 
 
 def patch_help_card_css() -> None:
-    """帮助卡片（粉色安装提示）只上移，内边距/按钮间距恢复官方原样。"""
+    """帮助卡片（粉色安装提示）上移 2.8em，padding 10px 15px，按钮间距保持官方原样。"""
     p = "src/ui/index.css"
     if not os.path.exists(p):
         print("[info] 没有 src/ui/index.css，跳过")
@@ -459,14 +459,14 @@ def patch_help_card_css() -> None:
     old = "div.install-me, div.trust-me {\n    margin-top: 0.5em;\n    padding: 20px;"
     new_rule = ("div.install-me, div.trust-me {\n"
                 "    /* rdgen: help card lifted */\n"
-                "    margin-top: -3em;\n"
+                "    margin-top: -2.8em;\n"
                 "    padding: 10px 15px;")
     if old not in s:
         print("[warn] src/ui/index.css: 没找到 install-me 规则，未调整")
         return
     s = s.replace(old, new_rule, 1)
     write(p, s)
-    print("[ok] src/ui/index.css: 帮助卡片上移 3em，padding 10px 15px")
+    print("[ok] src/ui/index.css: 帮助卡片上移 2.8em，padding 10px 15px")
 
 
 def patch_no_install_tip() -> None:

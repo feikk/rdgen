@@ -496,9 +496,9 @@ def patch_no_install_tip() -> None:
     patch_help_card_css()
 
     try:
-        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "520").strip())
+        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "500").strip())
     except ValueError:
-        h = 520
+        h = 500
 
     # 0) 帮助卡片是否真的会显示（和上面那条渲染条件保持一致）
     if "rdgen_help_card" not in s:

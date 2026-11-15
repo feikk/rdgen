@@ -460,13 +460,13 @@ def patch_help_card_css() -> None:
     new_rule = ("div.install-me, div.trust-me {\n"
                 "    /* rdgen: help card lifted */\n"
                 "    margin-top: -3em;\n"
-                "    padding: 20px;")
+                "    padding: 10px 15px;")
     if old not in s:
         print("[warn] src/ui/index.css: 没找到 install-me 规则，未调整")
         return
     s = s.replace(old, new_rule, 1)
     write(p, s)
-    print("[ok] src/ui/index.css: 帮助卡片上移 3em（内边距保持原样）")
+    print("[ok] src/ui/index.css: 帮助卡片上移 3em，padding 10px 15px")
 
 
 def patch_no_install_tip() -> None:

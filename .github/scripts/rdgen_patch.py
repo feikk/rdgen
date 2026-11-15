@@ -446,47 +446,27 @@ def patch_incoming_width() -> None:
 
 
 def patch_help_card_css() -> None:
-    """帮助卡片（粉色安装提示）上下收一收，安装按钮的上下边距也减半。"""
+    """帮助卡片（粉色安装提示）只上移，内边距/按钮间距恢复官方原样。"""
     p = "src/ui/index.css"
     if not os.path.exists(p):
         print("[info] 没有 src/ui/index.css，跳过")
         return
     s = read(p)
-    if "rdgen: compact help card" in s:
-        print("[skip] src/ui/index.css: 帮助卡片间距已调整")
+    if "rdgen: help card lifted" in s:
+        print("[skip] src/ui/index.css: 帮助卡片已上移")
         return
 
     old = "div.install-me, div.trust-me {\n    margin-top: 0.5em;\n    padding: 20px;"
     new_rule = ("div.install-me, div.trust-me {\n"
-                "    /* rdgen: compact help card */\n"
-                "    margin-top: -0.5em;\n"
-                "    padding: 6px 16px 8px 16px;")
+                "    /* rdgen: help card lifted */\n"
+                "    margin-top: -3em;\n"
+                "    padding: 20px;")
     if old not in s:
         print("[warn] src/ui/index.css: 没找到 install-me 规则，未调整")
         return
     s = s.replace(old, new_rule, 1)
-
-    # 卡片标题下方的间距减半
-    old_title = ("div.trust-me > div:nth-child(1),\n"
-                 "div.install-me > div:nth-child(1) {\n"
-                 "    font-size: 1.2em;\n"
-                 "    font-weight: bold;\n"
-                 "    text-align: center;\n"
-                 "    margin-bottom: 0.5em;\n"
-                 "}")
-    if old_title in s:
-        s = s.replace(old_title, old_title.replace("margin-bottom: 0.5em;",
-                                                   "margin-bottom: 0.25em;"), 1)
-
-    # 安装按钮上下边距收一半（原规则只对 .link 生效，这里补一条更具体的）
-    s += ("\n/* rdgen: compact help card - install button spacing */\n"
-          "div.install-me #install-me,\n"
-          "div.install-me button {\n"
-          "    margin-top: 0.2em;\n"
-          "    margin-bottom: 0.2em;\n"
-          "}\n")
     write(p, s)
-    print("[ok] src/ui/index.css: 帮助卡片与安装按钮上下边距收窄")
+    print("[ok] src/ui/index.css: 帮助卡片上移 3em（内边距保持原样）")
 
 
 def patch_no_install_tip() -> None:
@@ -520,24 +500,42 @@ def patch_no_install_tip() -> None:
     except ValueError:
         h = 520
 
-    # 1) 最小窗口高度（原来 is_installed() ? 300 : 390）
-    s, nh = re.subn(r"\? 300 : (?:300|390)", "? %d : %d" % (h, h), s, count=1)
-    if nh:
-        print("[ok] src/ui/index.tis: 仅受控窗口最小高度 -> %d" % h)
+    # 0) 帮助卡片是否真的会显示（和上面那条渲染条件保持一致）
+    if "rdgen_help_card" not in s:
+        marker = "const incoming_only_width = "
+        idx = s.find(marker)
+        if idx >= 0:
+            eol = s.find("\n", idx)
+            s = s[:eol + 1] + (
+                "const rdgen_help_card = (!is_win || handler.is_installed() || disable_installation"
+                " || handler.get_builtin_option(\"hide-help-cards\") == \"Y\") ? false : true;\n"
+            ) + s[eol + 1:]
+            print("[ok] src/ui/index.tis: rdgen_help_card = %s" % "on demand")
 
-    # 2) 首次打开时的居中尺寸（centerize(..., scaleIt(incoming_only ? 390 : 600))）
-    s, nc = re.subn(r"scaleIt\(incoming_only \? \d+( : 600\)\))",
-                    lambda m: "scaleIt(incoming_only ? %d" % h + m.group(1), s, count=1)
+    # 1) 最小窗口高度：有帮助卡片时用 h，否则保持官方 300/390
+    if "rdgen: help card height" not in s:
+        s, nh = re.subn(r"\(handler\.is_installed\(\) \|\| disable_installation\) \? 300 : (?:300|390)",
+                        "(rdgen_help_card ? %d : ((handler.is_installed() || disable_installation) ? 300 : 390))"
+                        " /* rdgen: help card height */" % h,
+                        s, count=1)
+        if nh:
+            print("[ok] src/ui/index.tis: incoming-only min height -> help card ? %d : 300/390" % h)
+
+    # 2) 首次打开时的居中尺寸
+    s, nc = re.subn(r"scaleIt\(incoming_only \? (?:\d+|rdgen\w+)( : 600\)\))",
+                    lambda m: "scaleIt(incoming_only ? (rdgen_help_card ? %d : 390)" % h + m.group(1),
+                    s, count=1)
     if nc:
-        print("[ok] src/ui/index.tis: 仅受控窗口初始高度 -> %d" % h)
+        print("[ok] src/ui/index.tis: incoming-only initial height -> help card ? %d : 390" % h)
 
-    # 3) 恢复上次保存的窗口大小时，把过矮的高度抬到 h（否则老用户仍是旧高度被裁）
+    # 3) 恢复上次保存的尺寸时，只有在帮助卡片会显示时才抬到 h
     if "rdgen: force min height" not in s:
         anchor = "    if (isReasonableSize(r) && r[2] > 0) {\n"
         if anchor in s:
             s = s.replace(anchor, anchor
-                          + "        if (incoming_only && r[3] < %d) r[3] = %d; // rdgen: force min height\n" % (h, h), 1)
-            print("[ok] src/ui/index.tis: 恢复窗口尺寸时补高度下限 -> %d" % h)
+                          + "        if (incoming_only && rdgen_help_card && r[3] < %d) r[3] = %d; // rdgen: force min height\n"
+                          % (h, h), 1)
+            print("[ok] src/ui/index.tis: clamp restored height -> %d (only with help card)" % h)
         else:
             print("[warn] src/ui/index.tis: 没找到 self.ready 的尺寸判断，跳过高度钳制")
 

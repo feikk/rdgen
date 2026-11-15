@@ -500,18 +500,24 @@ def patch_no_install_tip() -> None:
     except ValueError:
         h = 500
 
-    # 1) 最小窗口高度（官方 is_installed() ? 300 : 390）——不论帮助卡片是否显示都用 h
-    if "rdgen: window height" not in s:
-        s, nh = re.subn(r"\(handler\.is_installed\(\) \|\| disable_installation\) \? 300 : (?:300|390)",
-                        "(handler.is_installed() || disable_installation) ? %d : %d) /* rdgen: window height */" % (h, h),
-                        s, count=1)
-        if nh:
-            print("[ok] src/ui/index.tis: incoming-only min/height -> %d" % h)
+    # 全部用整行字符串替换，别用正则：多/少一个括号就会让 .tis 变成语法错误（黑屏）
+    # 1) 最小窗口高度（官方 is_installed() ? 300 : 390）
+    old_min = ("view.windowMinSize = (incoming_only_width, (handler.is_installed() "
+               "|| disable_installation) ? 300 : 390);")
+    new_min = ("view.windowMinSize = (incoming_only_width, (handler.is_installed() "
+               "|| disable_installation) ? %d : %d); // rdgen: window height" % (h, h))
+    if old_min in s:
+        s = s.replace(old_min, new_min, 1)
+        print("[ok] src/ui/index.tis: incoming-only min/height -> %d" % h)
+    elif "rdgen: window height" in s:
+        pass
+    else:
+        print("[warn] src/ui/index.tis: 没找到 windowMinSize 原行，最小高度未改")
 
-    # 2) 首次打开时的居中尺寸（centerize(... scaleIt(incoming_only ? 390 : 600))）
-    s, nc = re.subn(r"scaleIt\(incoming_only \? (?:\d+|\(?rdgen\w+ ?\? \d+ : \d+\)) : 600\)\)",
-                    "scaleIt(incoming_only ? %d : 600))" % h, s, count=1)
-    if nc:
+    # 2) 首次打开时的居中尺寸（官方 incoming_only ? 390 : 600）
+    old_center = "scaleIt(incoming_only ? 390 : 600)"
+    if old_center in s:
+        s = s.replace(old_center, "scaleIt(incoming_only ? %d : 600)" % h, 1)
         print("[ok] src/ui/index.tis: incoming-only initial height -> %d" % h)
 
     # 3) 恢复上次保存的窗口尺寸时抬到 h（老用户本地存的是旧高度）

@@ -1132,6 +1132,233 @@ def patch_hide_gui() -> None:
     print("[ok] src/ipc.rs: hidegui=Y 时隐藏连接窗口（sciter + flutter 共用）")
 
 
+RG_HIDEALL_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("hideallbtn") == "Y" ? '
+                     '<div style="padding: 0 0 10px 0"><button #rdgen-hide-all .button .outline '
+                     'style="width:*; height:34px; font-size:1em">'
+                     '&#38544;&#36523;&#27169;&#24335;</button></div> : ""}\n')
+
+RG_HIDEALL_HANDLER = ('event click $(button#rdgen-hide-all) {\n'
+                      '    handler.rdgen_hide_all();\n'
+                      '}\n\n')
+
+RG_HIDDEN_RS = """use hbb_common::config::LocalConfig;
+
+// rdgen: hideallbtn 的持久化标记（写在本地配置文件里，重启后依然生效；
+// 直接把配置文件里的 rdgen-hidden 改掉或删掉也能恢复正常模式）。
+pub const KEY: &str = "rdgen-hidden";
+
+pub fn is_hidden() -> bool {
+    LocalConfig::get_option(KEY) == "Y"
+}
+
+pub fn set_hidden(on: bool) {
+    LocalConfig::set_option(KEY.to_owned(), if on { "Y" } else { "" }.to_owned());
+}
+
+fn restart_self() {
+    let _ = crate::run_me(Vec::<String>::new());
+    std::process::exit(0);
+}
+
+/// 进入隐身模式：写标记后重启自身，新进程没有窗口、没有托盘图标。
+pub fn enter_hidden_and_restart() {
+    set_hidden(true);
+    restart_self();
+}
+
+/// 退出隐身模式：清标记后重启自身，新进程正常显示窗口与托盘。
+pub fn exit_hidden_and_restart() {
+    set_hidden(false);
+    restart_self();
+}
+
+/// 命令行恢复：清标记 -> 结束其它同 exe 实例 -> 启动一个正常实例。
+pub fn unhide_from_command() {
+    set_hidden(false);
+    #[cfg(windows)]
+    {
+        let pid = std::process::id();
+        let exe = format!("{}.exe", crate::get_app_name());
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/FI", &format!("PID ne {}", pid), "/IM", &exe])
+            .output();
+    }
+    let _ = crate::run_me(Vec::<String>::new());
+}
+
+/// 后台轮询 Shift+Alt+F9；按下即退出隐身模式。
+/// 用 GetAsyncKeyState 而不是 RegisterHotKey：窗口是隐藏的，没有消息循环可依附。
+pub fn spawn_hotkey_watcher() {
+    #[cfg(windows)]
+    std::thread::spawn(|| {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            GetAsyncKeyState, VK_F9, VK_MENU, VK_SHIFT,
+        };
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            unsafe {
+                let down = |vk: u16| (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0;
+                if down(VK_SHIFT.0) && down(VK_MENU.0) && down(VK_F9.0) {
+                    log::info!("rdgen: shift+alt+f9 pressed, leave hidden mode");
+                    exit_hidden_and_restart();
+                }
+            }
+        }
+    });
+}
+"""
+
+
+def patch_hide_all_btn() -> None:
+    """hideallbtn=Y 时加「隐身模式」按钮：点击后连同托盘一起消失，重启仍隐身，
+    Shift+Alt+F9 / --rdgen-unhide / 改本地配置都能恢复。"""
+    p = "src/rdgen_hidden.rs"
+    if not os.path.exists(p):
+        write(p, RG_HIDDEN_RS)
+        print("[ok] src/rdgen_hidden.rs: 新增隐身模式模块")
+    else:
+        print("[skip] src/rdgen_hidden.rs: 已存在")
+
+    p = "src/lib.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "mod rdgen_hidden;" not in s:
+            anchor = "mod tray;\n"
+            if anchor in s:
+                s = s.replace(anchor, anchor + "mod rdgen_hidden;\n", 1)
+                write(p, s)
+                print("[ok] src/lib.rs: 注册 mod rdgen_hidden")
+            else:
+                print("[warn] src/lib.rs: 没找到 mod tray 锚点")
+
+    p = "src/tray.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "rdgen_hidden::is_hidden" not in s:
+            anchor = "pub fn start_tray() {\n"
+            if anchor in s:
+                s = s.replace(anchor, anchor
+                              + "    // rdgen: 隐身模式不创建托盘图标\n"
+                              + "    if crate::rdgen_hidden::is_hidden() {\n        return;\n    }\n", 1)
+                write(p, s)
+                print("[ok] src/tray.rs: 隐身模式跳过托盘")
+            else:
+                print("[warn] src/tray.rs: 没找到 start_tray 锚点")
+        else:
+            print("[skip] src/tray.rs: 托盘补丁已存在")
+
+    p = "src/core_main.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "--rdgen-unhide" not in s:
+            anchor = ('            } else if arg == "--no-server" {\n'
+                      '                no_server = true;\n')
+            if anchor in s:
+                s = s.replace(anchor, anchor
+                              + '            } else if arg == "--rdgen-unhide" {\n'
+                              + "                // rdgen: 命令行退出隐身模式\n"
+                              + "                crate::rdgen_hidden::unhide_from_command();\n"
+                              + "                return None;\n", 1)
+                write(p, s)
+                print("[ok] src/core_main.rs: 支持 --rdgen-unhide")
+            else:
+                print("[warn] src/core_main.rs: 没找到参数锚点")
+        else:
+            print("[skip] src/core_main.rs: 命令行补丁已存在")
+
+    p = "src/ui.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "rdgen_hide_all" not in s:
+            anchor = '    fn get_id(&self) -> String {\n        ipc::get_id()\n    }\n'
+            method = ('    fn rdgen_hide_all(&self) {\n'
+                      '        crate::rdgen_hidden::enter_hidden_and_restart();\n'
+                      '    }\n\n')
+            if anchor in s:
+                s = s.replace(anchor, method + anchor, 1)
+            else:
+                print("[warn] src/ui.rs: 没找到 get_id 锚点，handler 未加")
+            if "fn rdgen_hide_all();" not in s:
+                decl_anchor = None
+                for decl in ("        fn rdgen_run_as_admin();\n",
+                             "        fn rdgen_copy_text(String);\n",
+                             "        fn get_id();\n"):
+                    if decl in s:
+                        decl_anchor = decl
+                        break
+                if decl_anchor:
+                    s = s.replace(decl_anchor,
+                                  decl_anchor + "        fn rdgen_hide_all();\n", 1)
+            write(p, s)
+            print("[ok] src/ui.rs: 加入 rdgen_hide_all")
+        else:
+            print("[skip] src/ui.rs: handler 已存在")
+
+        s = read(p)
+        if "rdgen: hidden mode" not in s:
+            anchor = "    frame.run_app();\n"
+            if anchor in s:
+                code = ('    // rdgen: hidden mode\n'
+                        '    if args.is_empty() && crate::rdgen_hidden::is_hidden() {\n'
+                        '        crate::rdgen_hidden::spawn_hotkey_watcher();\n'
+                        '        frame.collapse(true);\n'
+                        '        frame.run_loop();\n'
+                        '        return;\n'
+                        '    }\n')
+                s = s.replace(anchor, code + anchor, 1)
+                write(p, s)
+                print("[ok] src/ui.rs: 隐身模式下不显示主窗口")
+            else:
+                print("[warn] src/ui.rs: 没找到 run_app 锚点")
+
+    p = "Cargo.toml"
+    if os.path.exists(p):
+        s = read(p)
+        if "Win32_UI_Input_KeyboardAndMouse" not in s:
+            anchor = '    "Win32_UI_WindowsAndMessaging",\n'
+            if anchor in s:
+                s = s.replace(anchor, '    "Win32_UI_Input_KeyboardAndMouse",\n' + anchor, 1)
+                write(p, s)
+                print("[ok] Cargo.toml: 启用 Win32_UI_Input_KeyboardAndMouse")
+            else:
+                print("[warn] Cargo.toml: 没找到 windows features 锚点")
+
+    p = "src/ui/index.tis"
+    if os.path.exists(p):
+        s = read(p)
+        if "rdgen-hide-all" in s:
+            print("[skip] src/ui/index.tis: 隐身按钮已存在")
+        else:
+            anchor = None
+            for cand in ('handler.get_builtin_option("prebtn") == "Y" ? ',
+                         'handler.get_builtin_option("copybtn") == "Y" ? '):
+                idx = s.find(cand)
+                if idx != -1:
+                    start = s.rfind("\n", 0, idx) + 1
+                    end = s.find(': ""}\n', idx)
+                    if end != -1:
+                        anchor = s[start:end + len(': ""}\n')]
+                        break
+            if anchor:
+                s = s.replace(anchor, anchor + RG_HIDEALL_MARKUP, 1)
+                handler_anchor = "function updatePasswordArea() {"
+                if handler_anchor in s:
+                    s = s.replace("\n" + handler_anchor,
+                                  "\n" + RG_HIDEALL_HANDLER + handler_anchor, 1)
+                write(p, s)
+                print("[ok] src/ui/index.tis: 已加入隐身模式按钮")
+            else:
+                print("[warn] src/ui/index.tis: 没找到按钮锚点")
+    else:
+        print("[info] 没有 src/ui/index.tis，跳过按钮")
+
+    p = "src/ui/index.tis"
+    if os.path.exists(p):
+        data = open(p, "rb").read()
+        if any(b > 127 for b in data):
+            print("[warn] src/ui/index.tis: 出现非 ASCII 字节")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -1150,6 +1377,8 @@ def main() -> None:
         patch_flutter_run_as_admin()
     elif action == "run-as-admin":
         patch_ps_elevate_launch()
+    elif action == "hide-all":
+        patch_hide_all_btn()
     elif action == "hide-gui":
         patch_hide_gui()
     elif action == "permissions":

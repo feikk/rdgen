@@ -1078,17 +1078,17 @@ def patch_access_mode_expand() -> None:
             "enable-audio",
             "allow-remote-config-modification",
         ];
+        // 只写 DEFAULT_SETTINGS：写进 OVERWRITE_SETTINGS 会被 is_option_fixed 判定为
+        // 「强制锁定」，界面变灰且用户/远程都无法修改。默认生效方式下用户应可自行更改。
         let mut d = config::DEFAULT_SETTINGS.write().unwrap();
-        let mut o = config::OVERWRITE_SETTINGS.write().unwrap();
         for k in perm_keys {
             d.insert(k.to_owned(), v.clone());
-            o.insert(k.to_owned(), v.clone());
         }
     }
 }"""
     s = s.replace(anchor, code, 1)
     write(p, s)
-    print("[ok] src/common.rs: access-mode 已展开到逐项权限开关")
+    print("[ok] src/common.rs: access-mode 已展开到逐项权限开关（只写默认设置，用户可改）")
 
 
 def main() -> None:

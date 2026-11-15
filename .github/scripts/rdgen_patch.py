@@ -1091,6 +1091,47 @@ def patch_access_mode_expand() -> None:
     print("[ok] src/common.rs: access-mode 已展开到逐项权限开关（只写默认设置，用户可改）")
 
 
+def patch_hide_gui() -> None:
+    """hidegui=Y 时让 IPC 的 hide_cm 直接返回 true。
+
+    上游本来就有「隐藏连接管理窗口」的机制：sciter 在 src/ui.rs 里用
+    frame.collapse(true) + run_loop 建一个隐藏窗口，flutter 在 main.dart 里用
+    windowManager.hide()；两边都靠 ipc 查询 "hide_cm" 决定。这里把这个查询的结果
+    接到自定义客户端参数 hidegui 上，一处改动同时覆盖 32 位(sciter)与 64 位(flutter)。
+    """
+    p = "src/ipc.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/ipc.rs，跳过")
+        return
+    s = read(p)
+    if "rdgen: hidegui" in s:
+        print("[skip] src/ipc.rs: hidegui 补丁已存在")
+        return
+    old = """                } else if name == "hide_cm" {
+                    value = if crate::hbbs_http::sync::is_pro() || crate::common::is_custom_client()
+                    {
+                        Some(hbb_common::password_security::hide_cm().to_string())
+                    } else {
+                        None
+                    };"""
+    new = """                } else if name == "hide_cm" {
+                    // rdgen: hidegui
+                    value = if crate::ui_interface::get_builtin_option("hidegui") == "Y" {
+                        Some("true".to_owned())
+                    } else if crate::hbbs_http::sync::is_pro() || crate::common::is_custom_client()
+                    {
+                        Some(hbb_common::password_security::hide_cm().to_string())
+                    } else {
+                        None
+                    };"""
+    if old not in s:
+        print("[warn] src/ipc.rs: hide_cm 锚点没找到，未接 hidegui")
+        return
+    s = s.replace(old, new, 1)
+    write(p, s)
+    print("[ok] src/ipc.rs: hidegui=Y 时隐藏连接窗口（sciter + flutter 共用）")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -1109,6 +1150,8 @@ def main() -> None:
         patch_flutter_run_as_admin()
     elif action == "run-as-admin":
         patch_ps_elevate_launch()
+    elif action == "hide-gui":
+        patch_hide_gui()
     elif action == "permissions":
         patch_sciter_permissions()
     elif action == "no-install-tip":

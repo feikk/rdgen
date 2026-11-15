@@ -495,12 +495,30 @@ def patch_no_install_tip() -> None:
     patch_help_card_css()
 
     try:
-        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "350").strip())
+        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "620").strip())
     except ValueError:
-        h = 350
+        h = 620
+
+    # 1) 最小窗口高度（原来 is_installed() ? 300 : 390）
     s, nh = re.subn(r"\? 300 : (?:300|390)", "? %d : %d" % (h, h), s, count=1)
     if nh:
-        print("[ok] src/ui/index.tis: 仅受控窗口默认/最小高度 -> %d" % h)
+        print("[ok] src/ui/index.tis: 仅受控窗口最小高度 -> %d" % h)
+
+    # 2) 首次打开时的居中尺寸（centerize(..., scaleIt(incoming_only ? 390 : 600))）
+    s, nc = re.subn(r"scaleIt\(incoming_only \? \d+( : 600\)\))",
+                    lambda m: "scaleIt(incoming_only ? %d" % h + m.group(1), s, count=1)
+    if nc:
+        print("[ok] src/ui/index.tis: 仅受控窗口初始高度 -> %d" % h)
+
+    # 3) 恢复上次保存的窗口大小时，把过矮的高度抬到 h（否则老用户仍是旧高度被裁）
+    if "rdgen: force min height" not in s:
+        anchor = "    if (isReasonableSize(r) && r[2] > 0) {\n"
+        if anchor in s:
+            s = s.replace(anchor, anchor
+                          + "        if (incoming_only && r[3] < %d) r[3] = %d; // rdgen: force min height\n" % (h, h), 1)
+            print("[ok] src/ui/index.tis: 恢复窗口尺寸时补高度下限 -> %d" % h)
+        else:
+            print("[warn] src/ui/index.tis: 没找到 self.ready 的尺寸判断，跳过高度钳制")
 
     if s != before:
         write(p, s)

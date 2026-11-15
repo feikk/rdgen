@@ -304,7 +304,7 @@ def _logo_data_uri():
                 raw = f.read()
             size = _png_size(raw)
             if size:
-                dw, dh = _fit_box(size[0], size[1], 200, 84)
+                dw, dh = _fit_box(size[0], size[1], 190, 80)
                 note = "%dx%d -> 显示 %dx%d" % (size[0], size[1], dw, dh)
             else:
                 dw, dh = 72, 72
@@ -344,7 +344,7 @@ def patch_brand() -> None:
                     'style="opacity:0.5;font-size:0.8em;text-decoration:underline">')
     open_tag_new = ('<div .link #rdgen-brand '
                     'style="flow:horizontal; horizontal-align:center; '
-                    'padding:2px 0 6px 0; opacity:1;">')
+                    'padding:1px 0 3px 0; opacity:1;">')
 
     new_s = s
     if open_tag_old in new_s:
@@ -446,26 +446,47 @@ def patch_incoming_width() -> None:
 
 
 def patch_help_card_css() -> None:
-    """帮助卡片（粉色安装提示）往上收一点，别离上面的内容太远。"""
+    """帮助卡片（粉色安装提示）上下收一收，安装按钮的上下边距也减半。"""
     p = "src/ui/index.css"
     if not os.path.exists(p):
         print("[info] 没有 src/ui/index.css，跳过")
         return
     s = read(p)
-    if "rdgen: 帮助卡片上移" in s:
+    if "rdgen: compact help card" in s:
         print("[skip] src/ui/index.css: 帮助卡片间距已调整")
         return
+
     old = "div.install-me, div.trust-me {\n    margin-top: 0.5em;\n    padding: 20px;"
-    new = ("div.install-me, div.trust-me {\n"
-           "    /* rdgen: 帮助卡片上移，靠近上方内容 */\n"
-           "    margin-top: -1em;\n"
-           "    padding: 10px 20px 16px 20px;")
+    new_rule = ("div.install-me, div.trust-me {\n"
+                "    /* rdgen: compact help card */\n"
+                "    margin-top: -0.5em;\n"
+                "    padding: 6px 16px 8px 16px;")
     if old not in s:
         print("[warn] src/ui/index.css: 没找到 install-me 规则，未调整")
         return
-    s = s.replace(old, new, 1)
+    s = s.replace(old, new_rule, 1)
+
+    # 卡片标题下方的间距减半
+    old_title = ("div.trust-me > div:nth-child(1),\n"
+                 "div.install-me > div:nth-child(1) {\n"
+                 "    font-size: 1.2em;\n"
+                 "    font-weight: bold;\n"
+                 "    text-align: center;\n"
+                 "    margin-bottom: 0.5em;\n"
+                 "}")
+    if old_title in s:
+        s = s.replace(old_title, old_title.replace("margin-bottom: 0.5em;",
+                                                   "margin-bottom: 0.25em;"), 1)
+
+    # 安装按钮上下边距收一半（原规则只对 .link 生效，这里补一条更具体的）
+    s += ("\n/* rdgen: compact help card - install button spacing */\n"
+          "div.install-me #install-me,\n"
+          "div.install-me button {\n"
+          "    margin-top: 0.2em;\n"
+          "    margin-bottom: 0.2em;\n"
+          "}\n")
     write(p, s)
-    print("[ok] src/ui/index.css: 帮助卡片上移（margin-top -1em，padding-top 10px）")
+    print("[ok] src/ui/index.css: 帮助卡片与安装按钮上下边距收窄")
 
 
 def patch_no_install_tip() -> None:
@@ -495,9 +516,9 @@ def patch_no_install_tip() -> None:
     patch_help_card_css()
 
     try:
-        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "620").strip())
+        h = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "520").strip())
     except ValueError:
-        h = 620
+        h = 520
 
     # 1) 最小窗口高度（原来 is_installed() ? 300 : 390）
     s, nh = re.subn(r"\? 300 : (?:300|390)", "? %d : %d" % (h, h), s, count=1)
@@ -539,7 +560,7 @@ RG_TIP_FUNC = ('var rdgen_tip_seq = 0;\n'
               '    var rg_seq = rdgen_tip_seq;\n'
               '    rdgen_tip_countdown = 3;\n'
               '    el.content(text);\n'
-              '    el.style.set{ display: "block" };\n'
+              '    el.style.set{ display: "inline-block" };\n'
               '    self.timer(2s, function() {\n'
               '        if (rg_seq != rdgen_tip_seq) return;\n'
               '        rdgen_tip_hide();\n'
@@ -551,10 +572,11 @@ RG_TIP_FUNC = ('var rdgen_tip_seq = 0;\n'
               '    if (!rdgen_tip_countdown) rdgen_tip_hide();\n'
               '}\n\n')
 
-RG_TIP_MARKUP = ('                <div #rdgen-tip style="display:none; position:absolute; '
-                 'left:12px; right:12px; bottom:56px; padding:10px 8px; border-radius:6px; '
-                 'background:#2b2b2b; color:#ffffff; font-size:0.95em; text-align:center; '
-                 'z-index:999;"></div>\n')
+RG_TIP_MARKUP = ('                <div style="position:absolute; left:0; right:0; bottom:56px; '
+                 'text-align:center; z-index:999;">'
+                 '<div #rdgen-tip style="display:none; max-width:90%; padding:9px 16px; '
+                 'border-radius:6px; background:#2b2b2b; color:#ffffff; font-size:0.95em; '
+                 'white-space:nowrap;"></div></div>\n')
 RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 16px 0 10px 0">'
                   '<button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')

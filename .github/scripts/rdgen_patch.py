@@ -1142,10 +1142,14 @@ RG_HIDEALL_HANDLER = ('event click $(button#rdgen-hide-all) {\n'
                       '}\n\n')
 
 RG_HIDDEN_RS = """use hbb_common::{config::LocalConfig, log};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
 // rdgen: hideallbtn 的持久化标记（写在本地配置文件里，重启后依然生效；
-// 直接把配置文件里的 rdgen-hidden 改掉或删掉也能恢复正常模式）。
-pub const KEY: &str = "rdgen-hidden";
+// 直接把配置里的 hidden-all 改掉或删掉也能恢复正常模式）。
+pub const KEY: &str = "hidden-all";
+
+static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
+static WATCHING: AtomicBool = AtomicBool::new(false);
 
 pub fn is_hidden() -> bool {
     LocalConfig::get_option(KEY) == "Y"
@@ -1155,24 +1159,75 @@ pub fn set_hidden(on: bool) {
     LocalConfig::set_option(KEY.to_owned(), if on { "Y" } else { "" }.to_owned());
 }
 
-fn restart_self() {
-    let _ = crate::run_me(Vec::<String>::new());
-    std::process::exit(0);
+pub fn set_main_window_handle(hwnd: isize) {
+    MAIN_HWND.store(hwnd, Ordering::SeqCst);
 }
 
-/// 进入隐身模式：写标记后重启自身，新进程没有窗口、没有托盘图标。
-pub fn enter_hidden_and_restart() {
+#[cfg(windows)]
+fn show_main_window(visible: bool) {
+    let hwnd = MAIN_HWND.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return;
+    }
+    unsafe {
+        winapi::um::winuser::ShowWindow(hwnd as _, if visible {
+            winapi::um::winuser::SW_SHOW
+        } else {
+            winapi::um::winuser::SW_HIDE
+        });
+    }
+}
+
+#[cfg(not(windows))]
+fn show_main_window(_visible: bool) {}
+
+/// 结束托盘进程（托盘是独立的 `--tray` 进程，按命令行参数精确匹配，避免误杀自身）。
+/// 32 位构建上用上游公开的 wmic 版本（64 位系统下 sysinfo 读不到 32 位进程的命令行）。
+#[cfg(all(windows, not(target_pointer_width = "64")))]
+fn kill_tray() {
+    let exe = format!("{}.exe", crate::get_app_name());
+    let pids = match crate::platform::windows::get_pids_with_first_arg_check_session(
+        &exe, "--tray", true,
+    ) {
+        Ok(pids) => pids,
+        Err(e) => {
+            log::warn!("rdgen: list tray pids failed: {e}");
+            return;
+        }
+    };
+    if pids.is_empty() {
+        return;
+    }
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.arg("/F");
+    for p in pids.iter() {
+        cmd.arg("/PID").arg(p.as_u32().to_string());
+    }
+    let _ = cmd.output();
+}
+
+#[cfg(not(all(windows, not(target_pointer_width = "64"))))]
+fn kill_tray() {}
+
+/// 进入隐身模式：不重启进程（重启会丢掉一次性的管理员提权），
+/// 只把主窗口隐藏、托盘进程结束，并启动快捷键监听。
+pub fn enter_hidden_in_place() {
     set_hidden(true);
-    restart_self();
+    kill_tray();
+    show_main_window(false);
+    spawn_hotkey_watcher();
+    log::info!("rdgen: hidden mode on");
 }
 
-/// 退出隐身模式：清标记后重启自身，新进程正常显示窗口与托盘。
-pub fn exit_hidden_and_restart() {
+/// 退出隐身模式：清标记并把主窗口显示出来，权限状态原样保留。
+pub fn exit_hidden_in_place() {
     set_hidden(false);
-    restart_self();
+    show_main_window(true);
+    log::info!("rdgen: hidden mode off");
 }
 
-/// 命令行恢复：清标记 -> 结束其它同 exe 实例 -> 启动一个正常实例。
+/// 命令行恢复：当前实例看不到别的进程的窗口句柄，所以清标记后重启自身进程；
+/// 结束其它实例时按 PID 排除自己，避免把刚拉起的进程一起杀掉。
 pub fn unhide_from_command() {
     set_hidden(false);
     #[cfg(windows)]
@@ -1186,32 +1241,43 @@ pub fn unhide_from_command() {
     let _ = crate::run_me(Vec::<String>::new());
 }
 
-/// 后台轮询 Shift+Alt+F9；按下即退出隐身模式。
-/// 用 GetAsyncKeyState 而不是 RegisterHotKey：窗口是隐藏的，没有消息循环可依附。
+/// 后台轮询 Ctrl+Shift+F6；按下即退出隐身模式。
+/// 用 GetAsyncKeyState 而不是 RegisterHotKey：窗口不可见，没有消息循环可依附。
 pub fn spawn_hotkey_watcher() {
     #[cfg(windows)]
-    std::thread::spawn(|| {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{
-            GetAsyncKeyState, VK_F9, VK_MENU, VK_SHIFT,
-        };
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            unsafe {
-                let down = |vk: u16| (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0;
-                if down(VK_SHIFT.0) && down(VK_MENU.0) && down(VK_F9.0) {
-                    log::info!("rdgen: shift+alt+f9 pressed, leave hidden mode");
-                    exit_hidden_and_restart();
+    if !WATCHING.swap(true, Ordering::SeqCst) {
+        std::thread::spawn(|| {
+            use winapi::um::winuser::{GetAsyncKeyState, VK_CONTROL, VK_F6, VK_SHIFT};
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                unsafe {
+                    let down = |vk: i32| (GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
+                    if down(VK_CONTROL) && down(VK_SHIFT) && down(VK_F6) {
+                        log::info!("rdgen: ctrl+shift+f6 pressed, leave hidden mode");
+                        exit_hidden_in_place();
+                        WATCHING.store(false, Ordering::SeqCst);
+                        break;
+                    }
                 }
             }
-        }
-    });
+        });
+    }
+    #[cfg(not(windows))]
+    {
+        WATCHING.store(false, Ordering::SeqCst);
+    }
+}
+
+fn _restart_self() {
+    let _ = crate::run_me(Vec::<String>::new());
+    std::process::exit(0);
 }
 """
 
 
 def patch_hide_all_btn() -> None:
-    """hideallbtn=Y 时加「隐身模式」按钮：点击后连同托盘一起消失，重启仍隐身，
-    Shift+Alt+F9 / --rdgen-unhide / 改本地配置都能恢复。"""
+    """hideallbtn=Y 时加「隐身模式」按钮：隐藏主窗口并结束托盘进程（不重启进程，
+    所以管理员提权不丢），Ctrl+Shift+F6 / --rdgen-unhide / 改本地配置都能恢复。"""
     p = "src/rdgen_hidden.rs"
     if not os.path.exists(p):
         write(p, RG_HIDDEN_RS)
@@ -1269,30 +1335,41 @@ def patch_hide_all_btn() -> None:
     p = "src/ui.rs"
     if os.path.exists(p):
         s = read(p)
-        if "rdgen_hide_all" not in s:
+        if "rdgen_hide_all(&self)" not in s:
             anchor = '    fn get_id(&self) -> String {\n        ipc::get_id()\n    }\n'
             method = ('    fn rdgen_hide_all(&self) {\n'
-                      '        crate::rdgen_hidden::enter_hidden_and_restart();\n'
+                      '        crate::rdgen_hidden::enter_hidden_in_place();\n'
                       '    }\n\n')
             if anchor in s:
                 s = s.replace(anchor, method + anchor, 1)
             else:
                 print("[warn] src/ui.rs: 没找到 get_id 锚点，handler 未加")
-            if "fn rdgen_hide_all();" not in s:
-                decl_anchor = None
-                for decl in ("        fn rdgen_run_as_admin();\n",
-                             "        fn rdgen_copy_text(String);\n",
-                             "        fn get_id();\n"):
-                    if decl in s:
-                        decl_anchor = decl
-                        break
-                if decl_anchor:
-                    s = s.replace(decl_anchor,
-                                  decl_anchor + "        fn rdgen_hide_all();\n", 1)
-            write(p, s)
-            print("[ok] src/ui.rs: 加入 rdgen_hide_all")
-        else:
-            print("[skip] src/ui.rs: handler 已存在")
+        if "fn rdgen_hide_all();" not in s:
+            decl_anchor = None
+            for decl in ("        fn rdgen_run_as_admin();\n",
+                         "        fn rdgen_copy_text(String);\n",
+                         "        fn get_id();\n"):
+                if decl in s:
+                    decl_anchor = decl
+                    break
+            if decl_anchor:
+                s = s.replace(decl_anchor,
+                              decl_anchor + "        fn rdgen_hide_all();\n", 1)
+        write(p, s)
+        print("[ok] src/ui.rs: 加入 rdgen_hide_all")
+
+        s = read(p)
+        if "rdgen: record hwnd" not in s:
+            anchor = "    frame.set_title(&crate::get_app_name());\n"
+            if anchor in s:
+                s = s.replace(anchor, anchor
+                              + "    // rdgen: record hwnd\n"
+                              + "    #[cfg(windows)]\n"
+                              + "    crate::rdgen_hidden::set_main_window_handle(frame.get_hwnd() as isize);\n", 1)
+                write(p, s)
+                print("[ok] src/ui.rs: 记录主窗口句柄")
+            else:
+                print("[warn] src/ui.rs: 没找到 set_title 锚点，句柄未记录")
 
         s = read(p)
         if "rdgen: hidden mode" not in s:
@@ -1311,19 +1388,6 @@ def patch_hide_all_btn() -> None:
             else:
                 print("[warn] src/ui.rs: 没找到 run_app 锚点")
 
-    p = "Cargo.toml"
-    if os.path.exists(p):
-        s = read(p)
-        if "Win32_UI_Input_KeyboardAndMouse" not in s:
-            i = s.find("windows = { version")
-            j = s.find("] }", i) if i != -1 else -1
-            if j != -1:
-                s = s[:j] + '    "Win32_UI_Input_KeyboardAndMouse",\n' + s[j:]
-                write(p, s)
-                print("[ok] Cargo.toml: 启用 Win32_UI_Input_KeyboardAndMouse")
-            else:
-                print("[warn] Cargo.toml: 没找到 windows 依赖块")
-
     p = "src/ui/index.tis"
     if os.path.exists(p):
         s = read(p)
@@ -1340,6 +1404,10 @@ def patch_hide_all_btn() -> None:
                     if end != -1:
                         anchor = s[start:end + len(': ""}\n')]
                         break
+            if anchor is None:
+                fallback = "                        {!outgoing_only && <PasswordArea />}\n"
+                if fallback in s:
+                    anchor = fallback
             if anchor:
                 s = s.replace(anchor, anchor + RG_HIDEALL_MARKUP, 1)
                 handler_anchor = "function updatePasswordArea() {"
@@ -1349,17 +1417,7 @@ def patch_hide_all_btn() -> None:
                 write(p, s)
                 print("[ok] src/ui/index.tis: 已加入隐身模式按钮")
             else:
-                fallback = "                        {!outgoing_only && <PasswordArea />}\n"
-                if fallback in s:
-                    s = s.replace(fallback, fallback + RG_HIDEALL_MARKUP, 1)
-                    handler_anchor = "function updatePasswordArea() {"
-                    if handler_anchor in s:
-                        s = s.replace("\n" + handler_anchor,
-                                      "\n" + RG_HIDEALL_HANDLER + handler_anchor, 1)
-                    write(p, s)
-                    print("[ok] src/ui/index.tis: 已加入隐身模式按钮（兜底位置）")
-                else:
-                    print("[warn] src/ui/index.tis: 没找到按钮锚点")
+                print("[warn] src/ui/index.tis: 没找到按钮锚点")
     else:
         print("[info] 没有 src/ui/index.tis，跳过按钮")
 

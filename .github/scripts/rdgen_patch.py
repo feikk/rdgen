@@ -1141,7 +1141,7 @@ RG_HIDEALL_HANDLER = ('event click $(button#rdgen-hide-all) {\n'
                       '    handler.rdgen_hide_all();\n'
                       '}\n\n')
 
-RG_HIDDEN_RS = """use hbb_common::config::LocalConfig;
+RG_HIDDEN_RS = """use hbb_common::{config::LocalConfig, log};
 
 // rdgen: hideallbtn 的持久化标记（写在本地配置文件里，重启后依然生效；
 // 直接把配置文件里的 rdgen-hidden 改掉或删掉也能恢复正常模式）。
@@ -1315,13 +1315,14 @@ def patch_hide_all_btn() -> None:
     if os.path.exists(p):
         s = read(p)
         if "Win32_UI_Input_KeyboardAndMouse" not in s:
-            anchor = '    "Win32_UI_WindowsAndMessaging",\n'
-            if anchor in s:
-                s = s.replace(anchor, '    "Win32_UI_Input_KeyboardAndMouse",\n' + anchor, 1)
+            i = s.find("windows = { version")
+            j = s.find("] }", i) if i != -1 else -1
+            if j != -1:
+                s = s[:j] + '    "Win32_UI_Input_KeyboardAndMouse",\n' + s[j:]
                 write(p, s)
                 print("[ok] Cargo.toml: 启用 Win32_UI_Input_KeyboardAndMouse")
             else:
-                print("[warn] Cargo.toml: 没找到 windows features 锚点")
+                print("[warn] Cargo.toml: 没找到 windows 依赖块")
 
     p = "src/ui/index.tis"
     if os.path.exists(p):
@@ -1348,7 +1349,17 @@ def patch_hide_all_btn() -> None:
                 write(p, s)
                 print("[ok] src/ui/index.tis: 已加入隐身模式按钮")
             else:
-                print("[warn] src/ui/index.tis: 没找到按钮锚点")
+                fallback = "                        {!outgoing_only && <PasswordArea />}\n"
+                if fallback in s:
+                    s = s.replace(fallback, fallback + RG_HIDEALL_MARKUP, 1)
+                    handler_anchor = "function updatePasswordArea() {"
+                    if handler_anchor in s:
+                        s = s.replace("\n" + handler_anchor,
+                                      "\n" + RG_HIDEALL_HANDLER + handler_anchor, 1)
+                    write(p, s)
+                    print("[ok] src/ui/index.tis: 已加入隐身模式按钮（兜底位置）")
+                else:
+                    print("[warn] src/ui/index.tis: 没找到按钮锚点")
     else:
         print("[info] 没有 src/ui/index.tis，跳过按钮")
 

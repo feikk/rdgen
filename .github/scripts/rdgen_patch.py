@@ -566,7 +566,7 @@ RG_TIP_MARKUP = ('                <div style="position:absolute; left:0; right:0
                  '<div #rdgen-tip style="display:none; max-width:90%; padding:9px 16px; '
                  'border-radius:6px; background:#2b2b2b; color:#ffffff; font-size:0.95em; '
                  'white-space:nowrap;"></div></div>\n')
-RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 16px 0 10px 0">'
+RG_COPY_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 8px 0 6px 0">'
                   '<button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">'
                   '&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n')
 
@@ -604,7 +604,7 @@ RG_FLUTTER_METHOD = """
 """
 
 RG_ADMIN_MARKUP = ('                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() && handler.get_builtin_option("prebtn") == "Y" ? '
-                  '<div style="padding: 0 0 10px 0"><button #rdgen-run-as-admin .button .outline '
+                  '<div style="padding: 0 0 6px 0"><button #rdgen-run-as-admin .button .outline '
                   'style="width:*; height:34px; font-size:1em">'
                   '&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n')
 
@@ -1133,7 +1133,7 @@ def patch_hide_gui() -> None:
 
 
 RG_HIDEALL_MARKUP = ('                        {!outgoing_only && handler.get_builtin_option("hideallbtn") == "Y" ? '
-                     '<div style="padding: 0 0 10px 0"><button #rdgen-hide-all .button .outline '
+                     '<div style="padding: 0 0 6px 0"><button #rdgen-hide-all .button .outline '
                      'style="width:*; height:34px; font-size:1em">'
                      '&#38544;&#36523;&#27169;&#24335;</button></div> : ""}\n')
 
@@ -1175,11 +1175,19 @@ fn show_main_window(visible: bool) {
         } else {
             winapi::um::winuser::SW_HIDE
         });
+        if visible {
+            winapi::um::winuser::SetForegroundWindow(hwnd as _);
+        }
     }
 }
 
 #[cfg(not(windows))]
 fn show_main_window(_visible: bool) {}
+
+/// 启动时进入隐身模式用：窗口创建好、消息循环开始前直接把它藏起来。
+pub fn hide_main_window_now() {
+    show_main_window(false);
+}
 
 /// 结束托盘进程（托盘是独立的 `--tray` 进程，按命令行参数精确匹配，避免误杀自身）。
 /// 32 位构建上用上游公开的 wmic 版本（64 位系统下 sysinfo 读不到 32 位进程的命令行）。
@@ -1241,19 +1249,20 @@ pub fn unhide_from_command() {
     let _ = crate::run_me(Vec::<String>::new());
 }
 
-/// 后台轮询 Ctrl+Shift+F6；按下即退出隐身模式。
+/// 后台轮询 Ctrl+Alt+F6；按下即退出隐身模式。
 /// 用 GetAsyncKeyState 而不是 RegisterHotKey：窗口不可见，没有消息循环可依附。
+/// 50ms 一次，避免快速按键被漏掉。
 pub fn spawn_hotkey_watcher() {
     #[cfg(windows)]
     if !WATCHING.swap(true, Ordering::SeqCst) {
         std::thread::spawn(|| {
-            use winapi::um::winuser::{GetAsyncKeyState, VK_CONTROL, VK_F6, VK_SHIFT};
+            use winapi::um::winuser::{GetAsyncKeyState, VK_CONTROL, VK_F6, VK_MENU};
             loop {
-                std::thread::sleep(std::time::Duration::from_millis(200));
+                std::thread::sleep(std::time::Duration::from_millis(50));
                 unsafe {
                     let down = |vk: i32| (GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
-                    if down(VK_CONTROL) && down(VK_SHIFT) && down(VK_F6) {
-                        log::info!("rdgen: ctrl+shift+f6 pressed, leave hidden mode");
+                    if down(VK_CONTROL) && down(VK_MENU) && down(VK_F6) {
+                        log::info!("rdgen: ctrl+alt+f6 pressed, leave hidden mode");
                         exit_hidden_in_place();
                         WATCHING.store(false, Ordering::SeqCst);
                         break;

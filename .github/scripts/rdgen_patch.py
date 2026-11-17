@@ -1166,8 +1166,13 @@ def patch_hide_gui() -> None:
                         None
                     };"""
     new = """                } else if name == "hide_cm" {
-                    // rdgen: hidegui
-                    value = if crate::ui_interface::get_builtin_option("hidegui") == "Y" {
+                    // rdgen: hidegui / 隐身模式下都隐藏连接管理窗口
+                    let rdgen_hidden_now = hbb_common::config::LocalConfig::get_option("hidden-all") == "Y"
+                        && (crate::ui_interface::get_builtin_option("hideallbtn") == "Y"
+                            || crate::ui_interface::get_builtin_option("hideall") == "Y");
+                    value = if crate::ui_interface::get_builtin_option("hidegui") == "Y"
+                        || rdgen_hidden_now
+                    {
                         Some("true".to_owned())
                     } else if crate::hbbs_http::sync::is_pro() || crate::common::is_custom_client()
                     {
@@ -1204,11 +1209,21 @@ static WATCHING: AtomicBool = AtomicBool::new(false);
 // flutter（64 位）没有能直接 ShowWindow 的句柄，热键只置位，由 dart 侧轮询执行显隐
 static TOGGLE_REQ: AtomicBool = AtomicBool::new(false);
 
+/// 只有构建参数里带 hideallbtn=Y 或 hideall=Y 时，客户端才支持隐身
+/// （hideallbtn 额外在界面上给一个按钮；hideall 只开功能、不出按钮）。
+pub fn enabled() -> bool {
+    let opt = |k: &str| crate::common::get_builtin_option(k);
+    opt("hideallbtn") == "Y" || opt("hideall") == "Y"
+}
+
 pub fn is_hidden() -> bool {
-    LocalConfig::get_option(KEY) == "Y"
+    enabled() && LocalConfig::get_option(KEY) == "Y"
 }
 
 pub fn set_hidden(on: bool) {
+    if on && !enabled() {
+        return;
+    }
     LocalConfig::set_option(KEY.to_owned(), if on { "Y" } else { "" }.to_owned());
 }
 
@@ -1311,6 +1326,9 @@ pub fn unhide_from_command() {
 /// 注入的按键一样会触发（FSCapture 之类能用的原因也是这样）。窗口不可见不影响，
 /// 热键消息只要求线程有自己的消息队列。
 pub fn spawn_hotkey_watcher() {
+    if !enabled() {
+        return;
+    }
     #[cfg(windows)]
     if !WATCHING.swap(true, Ordering::SeqCst) {
         std::thread::spawn(|| unsafe {

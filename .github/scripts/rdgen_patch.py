@@ -1249,26 +1249,48 @@ pub fn unhide_from_command() {
     let _ = crate::run_me(Vec::<String>::new());
 }
 
-/// 后台轮询 Ctrl+Alt+F6；按下即退出隐身模式。
-/// 用 GetAsyncKeyState 而不是 RegisterHotKey：窗口不可见，没有消息循环可依附。
-/// 50ms 一次，避免快速按键被漏掉。
+/// 全局热键 Ctrl+Alt+6：按一下在「显示 / 隐身」之间切换。
+/// 用 RegisterHotKey 而不是 GetAsyncKeyState 轮询——被远程控制时按键是别的进程
+/// SendInput 注入的，GetAsyncKeyState 读不到；RegisterHotKey 走系统热键通道，
+/// 注入的按键一样会触发（FSCapture 之类能用的原因也是这样）。窗口不可见不影响，
+/// 热键消息只要求线程有自己的消息队列。
 pub fn spawn_hotkey_watcher() {
     #[cfg(windows)]
     if !WATCHING.swap(true, Ordering::SeqCst) {
-        std::thread::spawn(|| {
-            use winapi::um::winuser::{GetAsyncKeyState, VK_CONTROL, VK_F6, VK_MENU};
+        std::thread::spawn(|| unsafe {
+            use winapi::um::winuser::{
+                DispatchMessageW, GetMessageW, RegisterHotKey, TranslateMessage, UnregisterHotKey,
+                MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MSG, WM_HOTKEY,
+            };
+            const ID: i32 = 0x5244; // "RD"
+            const VK_6: u32 = 0x36;
+            if RegisterHotKey(std::ptr::null_mut(), ID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_6)
+                == 0
+            {
+                log::warn!("rdgen: register Ctrl+Alt+6 failed (maybe taken)");
+                WATCHING.store(false, Ordering::SeqCst);
+                return;
+            }
+            log::info!("rdgen: hotkey Ctrl+Alt+6 registered");
             loop {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                unsafe {
-                    let down = |vk: i32| (GetAsyncKeyState(vk) as u16 & 0x8000) != 0;
-                    if down(VK_CONTROL) && down(VK_MENU) && down(VK_F6) {
-                        log::info!("rdgen: ctrl+alt+f6 pressed, leave hidden mode");
+                let mut msg: MSG = std::mem::zeroed();
+                let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
+                if ret == 0 || ret == -1 {
+                    break;
+                }
+                if msg.message == WM_HOTKEY && msg.wParam == ID as usize {
+                    if is_hidden() {
+                        log::info!("rdgen: hotkey -> show");
                         exit_hidden_in_place();
-                        WATCHING.store(false, Ordering::SeqCst);
-                        break;
+                    } else {
+                        log::info!("rdgen: hotkey -> hidden");
+                        enter_hidden_in_place();
                     }
                 }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
             }
+            UnregisterHotKey(std::ptr::null_mut(), ID);
         });
     }
     #[cfg(not(windows))]
@@ -1286,7 +1308,7 @@ fn _restart_self() {
 
 def patch_hide_all_btn() -> None:
     """hideallbtn=Y 时加「隐身模式」按钮：隐藏主窗口并结束托盘进程（不重启进程，
-    所以管理员提权不丢），Ctrl+Shift+F6 / --rdgen-unhide / 改本地配置都能恢复。"""
+    所以管理员提权不丢），Ctrl+Alt+6 / --rdgen-unhide / 改本地配置都能恢复。"""
     p = "src/rdgen_hidden.rs"
     if not os.path.exists(p):
         write(p, RG_HIDDEN_RS)

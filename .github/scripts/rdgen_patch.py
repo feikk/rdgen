@@ -1576,7 +1576,7 @@ bool _rdgenHiddenPollingStarted = false;
 
 Future<void> rdgenHideMainWindow() async {
   await bind.rdgenStartHotkeyWatch();
-  await bind.rdgenSetHidden(true);
+  await bind.rdgenSetHidden(hidden: true);
   rdgenStartHiddenPolling();
   await windowManager.hide();
 }
@@ -1587,11 +1587,11 @@ void rdgenStartHiddenPolling() {
   Timer.periodic(const Duration(milliseconds: 400), (t) async {
     if (!bind.rdgenTakeToggleRequest()) return;
     if (bind.rdgenIsHidden()) {
-      await bind.rdgenSetHidden(false);
+      await bind.rdgenSetHidden(hidden: false);
       await windowManager.show();
       await windowManager.focus();
     } else {
-      await bind.rdgenSetHidden(true);
+      await bind.rdgenSetHidden(hidden: true);
       await windowManager.hide();
     }
   });
@@ -1670,7 +1670,7 @@ def patch_flutter_hide_all() -> None:
         return
     hide_branch = ("    } else if (bind.rdgenIsHidden()) {\n"
                    "      // rdgen: 启动即隐身\n"
-                   "      bind.rdgenStartHotkeyWatch();\n"
+                   "      await bind.rdgenStartHotkeyWatch();\n"
                    "      rdgenStartHiddenPolling();\n"
                    "      windowManager.setOpacity(1);\n"
                    "      windowManager.setTitle(getWindowName());\n"

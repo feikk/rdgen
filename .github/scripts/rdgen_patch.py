@@ -1245,27 +1245,20 @@ pub fn hide_main_window_now() {
 /// 结束托盘进程（托盘是独立的 `--tray` 进程，按命令行参数精确匹配，避免误杀自身）。
 /// 32 位构建走 wmic（sysinfo 读不到 32 位进程的命令行），64 位走 sysinfo。
 #[cfg(windows)]
-fn tray_pids(exe: &str) -> Vec<hbb_common::sysinfo::Pid> {
-    #[cfg(not(target_pointer_width = "64"))]
-    {
-        match crate::platform::windows::get_pids_with_first_arg_check_session(exe, "--tray", true) {
-            Ok(pids) => pids,
-            Err(e) => {
-                log::warn!("rdgen: list tray pids failed: {e}");
-                vec![]
-            }
-        }
-    }
-    #[cfg(target_pointer_width = "64")]
-    {
-        crate::platform::get_pids_of_process_with_first_arg(exe, "--tray")
-    }
-}
-
-#[cfg(windows)]
 fn kill_tray() {
     let exe = format!("{}.exe", crate::get_app_name());
-    let pids = tray_pids(&exe);
+    #[cfg(not(target_pointer_width = "64"))]
+    let pids = match crate::platform::windows::get_pids_with_first_arg_check_session(
+        &exe, "--tray", true,
+    ) {
+        Ok(pids) => pids,
+        Err(e) => {
+            log::warn!("rdgen: list tray pids failed: {e}");
+            return;
+        }
+    };
+    #[cfg(target_pointer_width = "64")]
+    let pids = crate::platform::get_pids_of_process_with_first_arg(&exe, "--tray");
     if pids.is_empty() {
         return;
     }

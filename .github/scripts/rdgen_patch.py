@@ -806,6 +806,35 @@ pub fn rdgen_is_elevated() -> SyncReturn<bool> {
     }
 }
 
+pub fn rdgen_is_hidden() -> SyncReturn<bool> {
+    SyncReturn(crate::rdgen_hidden::is_hidden())
+}
+
+pub fn rdgen_set_hidden(hidden: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        crate::rdgen_hidden::set_hidden_from_ui(hidden);
+    }
+}
+
+pub fn rdgen_start_hotkey_watch() {
+    #[cfg(target_os = "windows")]
+    {
+        crate::rdgen_hidden::spawn_hotkey_watcher();
+    }
+}
+
+pub fn rdgen_take_toggle_request() -> SyncReturn<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        SyncReturn(crate::rdgen_hidden::take_toggle_request())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        SyncReturn(false)
+    }
+}
+
 pub fn rdgen_run_as_admin() {
     #[cfg(target_os = "windows")]
     {
@@ -838,6 +867,27 @@ pub fn rdgen_run_as_admin() {
 """
 
 
+def ensure_hidden_module() -> None:
+    """让 src/rdgen_hidden.rs 存在并在 lib.rs 里注册（bridge 生成任务也要能解析）。"""
+    p = "src/rdgen_hidden.rs"
+    if not os.path.exists(p):
+        write(p, RG_HIDDEN_RS)
+        print("[ok] src/rdgen_hidden.rs: 新增隐身模式模块")
+    else:
+        print("[skip] src/rdgen_hidden.rs: 已存在")
+    p = "src/lib.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "mod rdgen_hidden;" not in s:
+            anchor = "mod tray;\n"
+            if anchor in s:
+                s = s.replace(anchor, anchor + "mod rdgen_hidden;\n", 1)
+                write(p, s)
+                print("[ok] src/lib.rs: 注册 mod rdgen_hidden")
+            else:
+                print("[warn] src/lib.rs: 没找到 mod tray 锚点")
+
+
 def patch_flutter_ffi_only() -> None:
     """只给 src/flutter_ffi.rs 加提权接口，供 bridge 生成任务（Linux）使用。
 
@@ -859,6 +909,7 @@ def patch_flutter_ffi_only() -> None:
     s = s.replace(RG_FLUTTER_FFI_ANCHOR, RG_FLUTTER_FFI_ANCHOR + RG_FLUTTER_FFI_CODE, 1)
     write(p, s)
     print("[ok] src/flutter_ffi.rs: 新增 rdgen_is_elevated / rdgen_run_as_admin")
+    ensure_hidden_module()
 
 
 def patch_flutter_run_as_admin() -> None:
@@ -1150,6 +1201,8 @@ pub const KEY: &str = "hidden-all";
 
 static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
 static WATCHING: AtomicBool = AtomicBool::new(false);
+// flutter（64 位）没有能直接 ShowWindow 的句柄，热键只置位，由 dart 侧轮询执行显隐
+static TOGGLE_REQ: AtomicBool = AtomicBool::new(false);
 
 pub fn is_hidden() -> bool {
     LocalConfig::get_option(KEY) == "Y"
@@ -1190,19 +1243,29 @@ pub fn hide_main_window_now() {
 }
 
 /// 结束托盘进程（托盘是独立的 `--tray` 进程，按命令行参数精确匹配，避免误杀自身）。
-/// 32 位构建上用上游公开的 wmic 版本（64 位系统下 sysinfo 读不到 32 位进程的命令行）。
-#[cfg(all(windows, not(target_pointer_width = "64")))]
+/// 32 位构建走 wmic（sysinfo 读不到 32 位进程的命令行），64 位走 sysinfo。
+#[cfg(windows)]
+fn tray_pids(exe: &str) -> Vec<hbb_common::sysinfo::Pid> {
+    #[cfg(not(target_pointer_width = "64"))]
+    {
+        match crate::platform::windows::get_pids_with_first_arg_check_session(exe, "--tray", true) {
+            Ok(pids) => pids,
+            Err(e) => {
+                log::warn!("rdgen: list tray pids failed: {e}");
+                vec![]
+            }
+        }
+    }
+    #[cfg(target_pointer_width = "64")]
+    {
+        crate::platform::get_pids_of_process_with_first_arg(exe, "--tray")
+    }
+}
+
+#[cfg(windows)]
 fn kill_tray() {
     let exe = format!("{}.exe", crate::get_app_name());
-    let pids = match crate::platform::windows::get_pids_with_first_arg_check_session(
-        &exe, "--tray", true,
-    ) {
-        Ok(pids) => pids,
-        Err(e) => {
-            log::warn!("rdgen: list tray pids failed: {e}");
-            return;
-        }
-    };
+    let pids = tray_pids(&exe);
     if pids.is_empty() {
         return;
     }
@@ -1214,7 +1277,7 @@ fn kill_tray() {
     let _ = cmd.output();
 }
 
-#[cfg(not(all(windows, not(target_pointer_width = "64"))))]
+#[cfg(not(windows))]
 fn kill_tray() {}
 
 /// 进入隐身模式：不重启进程（重启会丢掉一次性的管理员提权），
@@ -1264,8 +1327,9 @@ pub fn spawn_hotkey_watcher() {
             };
             const ID: i32 = 0x5244; // "RD"
             const VK_6: u32 = 0x36;
-            if RegisterHotKey(std::ptr::null_mut(), ID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_6)
-                == 0
+            // winapi 里 MOD_* 是 LPARAM(isize)，RegisterHotKey 要 u32，必须显式转换
+            let mods: u32 = (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT) as u32;
+            if RegisterHotKey(std::ptr::null_mut(), ID, mods, VK_6) == 0
             {
                 log::warn!("rdgen: register Ctrl+Alt+6 failed (maybe taken)");
                 WATCHING.store(false, Ordering::SeqCst);
@@ -1279,12 +1343,21 @@ pub fn spawn_hotkey_watcher() {
                     break;
                 }
                 if msg.message == WM_HOTKEY && msg.wParam == ID as usize {
-                    if is_hidden() {
-                        log::info!("rdgen: hotkey -> show");
-                        exit_hidden_in_place();
-                    } else {
-                        log::info!("rdgen: hotkey -> hidden");
-                        enter_hidden_in_place();
+                    // flutter 侧窗口由 dart 的 windowManager 管理，这里只置位
+                    #[cfg(feature = "flutter")]
+                    {
+                        log::info!("rdgen: hotkey hit (flutter, hand over to dart)");
+                        TOGGLE_REQ.store(true, Ordering::SeqCst);
+                    }
+                    #[cfg(not(feature = "flutter"))]
+                    {
+                        if is_hidden() {
+                            log::info!("rdgen: hotkey -> show");
+                            exit_hidden_in_place();
+                        } else {
+                            log::info!("rdgen: hotkey -> hidden");
+                            enter_hidden_in_place();
+                        }
                     }
                 }
                 TranslateMessage(&msg);
@@ -1296,6 +1369,21 @@ pub fn spawn_hotkey_watcher() {
     #[cfg(not(windows))]
     {
         WATCHING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// 供 dart 轮询：热键是否要求切换显隐（64 位 flutter 端用）。
+pub fn take_toggle_request() -> bool {
+    TOGGLE_REQ.swap(false, Ordering::SeqCst)
+}
+
+/// 供 dart 调用：进入/退出隐身模式（只写配置 + 结束托盘，窗口由 dart 收起来）。
+pub fn set_hidden_from_ui(on: bool) {
+    if on {
+        set_hidden(true);
+        kill_tray();
+    } else {
+        set_hidden(false);
     }
 }
 
@@ -1457,6 +1545,139 @@ def patch_hide_all_btn() -> None:
         data = open(p, "rb").read()
         if any(b > 127 for b in data):
             print("[warn] src/ui/index.tis: 出现非 ASCII 字节")
+
+    patch_flutter_hide_all()
+
+
+RG_FLUTTER_HIDEALL_METHOD = """
+  Widget buildRdgenHideAllButton() {
+    if (bind.mainGetBuildinOption(key: 'hideallbtn') != 'Y') return SizedBox();
+    return Padding(
+      padding: const EdgeInsets.only(left: 20.0, right: 16, bottom: 10),
+      child: SizedBox(
+        width: double.infinity,
+        height: 38,
+        child: OutlinedButton(
+          onPressed: () async {
+            await rdgenHideMainWindow();
+          },
+          child: Text('\\u9690\\u8eab\\u6a21\\u5f0f',
+              style: TextStyle(fontSize: 14)),
+        ),
+      ),
+    );
+  }
+
+"""
+
+RG_FLUTTER_HIDEALL_MAIN = """
+// rdgen: 隐身模式（hideallbtn=Y）——热键只置位，由这里收/放窗口
+bool _rdgenHiddenPollingStarted = false;
+
+Future<void> rdgenHideMainWindow() async {
+  await bind.rdgenStartHotkeyWatch();
+  await bind.rdgenSetHidden(true);
+  rdgenStartHiddenPolling();
+  await windowManager.hide();
+}
+
+void rdgenStartHiddenPolling() {
+  if (_rdgenHiddenPollingStarted) return;
+  _rdgenHiddenPollingStarted = true;
+  Timer.periodic(const Duration(milliseconds: 400), (t) async {
+    if (!bind.rdgenTakeToggleRequest()) return;
+    if (bind.rdgenIsHidden()) {
+      await bind.rdgenSetHidden(false);
+      await windowManager.show();
+      await windowManager.focus();
+    } else {
+      await bind.rdgenSetHidden(true);
+      await windowManager.hide();
+    }
+  });
+}
+"""
+
+
+def patch_flutter_hide_all() -> None:
+    """flutter（64 位标准端）也支持 hideallbtn=Y。
+
+    - src/flutter_ffi.rs: rdgenIsHidden / rdgenSetHidden / rdgenStartHotkeyWatch /
+      rdgenTakeToggleRequest（与 32 位共用 src/rdgen_hidden.rs 的热键注册）
+    - desktop_home_page.dart: 左栏加「隐身模式」按钮
+    - main.dart: 启动即隐身时不显示窗口；热键切换由 400ms 轮询承接
+    """
+    p = "src/flutter_ffi.rs"
+    if not os.path.exists(p):
+        print("[info] 没有 src/flutter_ffi.rs，跳过 flutter 隐身模式")
+        return
+    s = read(p)
+    if "rdgen_is_hidden" in s:
+        print("[skip] src/flutter_ffi.rs: 隐身接口已存在")
+    elif RG_FLUTTER_FFI_ANCHOR in s:
+        s = s.replace(RG_FLUTTER_FFI_ANCHOR, RG_FLUTTER_FFI_ANCHOR + RG_FLUTTER_FFI_CODE, 1)
+        write(p, s)
+        print("[ok] src/flutter_ffi.rs: 新增 rdgen 隐身 / 热键接口")
+    else:
+        print("[warn] src/flutter_ffi.rs: 锚点没找到，未加隐身接口")
+
+    p = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    if os.path.exists(p):
+        s = read(p)
+        if "buildRdgenHideAllButton" in s:
+            print("[skip] desktop_home_page.dart: 隐身按钮已存在")
+        else:
+            anchor_call = "      buildRdgenRunAsAdminButton(),\n"
+            if anchor_call in s:
+                s = s.replace(anchor_call, anchor_call + "      buildRdgenHideAllButton(),\n", 1)
+                method_anchor = "\n  buildPasswordBoard(BuildContext context) {"
+                if method_anchor in s:
+                    s = s.replace(method_anchor, "\n" + RG_FLUTTER_HIDEALL_METHOD
+                                  + "  buildPasswordBoard(BuildContext context) {", 1)
+                class_anchor = "class DesktopHomePage extends StatefulWidget {"
+                if class_anchor in s:
+                    s = s.replace(class_anchor, RG_FLUTTER_HIDEALL_MAIN + "\n" + class_anchor, 1)
+                write(p, s)
+                print("[ok] desktop_home_page.dart: 已加入隐身模式按钮")
+            else:
+                print("[warn] desktop_home_page.dart: 没找到管理员按钮锚点，隐身按钮未插入")
+    else:
+        print("[info] 没有 desktop_home_page.dart，跳过 flutter 隐身按钮")
+
+    p = "flutter/lib/main.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 main.dart，跳过 flutter 启动隐身")
+        return
+    s = read(p)
+    if "rdgenStartHiddenPolling" in s:
+        print("[skip] main.dart: 隐身模式补丁已存在")
+        return
+    imp = "import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';\n"
+    if imp not in s:
+        imp_anchor = "import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';\n"
+        if imp_anchor in s:
+            s = s.replace(imp_anchor, imp_anchor + imp, 1)
+    anchor = "void runMainApp(bool startService) async {\n"
+    if anchor not in s:
+        print("[warn] main.dart: 没找到 runMainApp 锚点")
+        return
+    show_anchor = ("    } else {\n"
+                   "      windowManager.show();\n"
+                   "      windowManager.focus();\n")
+    if show_anchor not in s:
+        write(p, s)
+        print("[warn] main.dart: 没找到显示窗口分支，只加了工具函数")
+        return
+    hide_branch = ("    } else if (bind.rdgenIsHidden()) {\n"
+                   "      // rdgen: 启动即隐身\n"
+                   "      bind.rdgenStartHotkeyWatch();\n"
+                   "      rdgenStartHiddenPolling();\n"
+                   "      windowManager.setOpacity(1);\n"
+                   "      windowManager.setTitle(getWindowName());\n"
+                   "      windowManager.hide();\n")
+    s = s.replace(show_anchor, hide_branch + show_anchor, 1)
+    write(p, s)
+    print("[ok] main.dart: 启动隐身 + 热键轮询")
 
 
 def main() -> None:

@@ -1204,20 +1204,11 @@ static WATCHING: AtomicBool = AtomicBool::new(false);
 // flutter（64 位）没有能直接 ShowWindow 的句柄，热键只置位，由 dart 侧轮询执行显隐
 static TOGGLE_REQ: AtomicBool = AtomicBool::new(false);
 
-/// hideallbtn=Y 才启用隐身模式。没有这个参数时，热键 / 启动隐身 / 按钮全都不生效，
-/// 也忽略配置里可能残留的 hidden-all=Y。
-pub fn enabled() -> bool {
-    crate::common::get_builtin_option("hideallbtn") == "Y"
-}
-
 pub fn is_hidden() -> bool {
-    enabled() && LocalConfig::get_option(KEY) == "Y"
+    LocalConfig::get_option(KEY) == "Y"
 }
 
 pub fn set_hidden(on: bool) {
-    if on && !enabled() {
-        return;
-    }
     LocalConfig::set_option(KEY.to_owned(), if on { "Y" } else { "" }.to_owned());
 }
 
@@ -1320,9 +1311,6 @@ pub fn unhide_from_command() {
 /// 注入的按键一样会触发（FSCapture 之类能用的原因也是这样）。窗口不可见不影响，
 /// 热键消息只要求线程有自己的消息队列。
 pub fn spawn_hotkey_watcher() {
-    if !enabled() {
-        return;
-    }
     #[cfg(windows)]
     if !WATCHING.swap(true, Ordering::SeqCst) {
         std::thread::spawn(|| unsafe {
@@ -1499,9 +1487,10 @@ def patch_hide_all_btn() -> None:
         if "rdgen: hidden mode" not in s:
             anchor = "    frame.run_app();\n"
             if anchor in s:
-                code = ('    // rdgen: hidden mode\n'
+                code = ('    // rdgen: hotkey watcher 常开（Ctrl+Alt+6 切换显示/隐身）\n'
+                        '    crate::rdgen_hidden::spawn_hotkey_watcher();\n'
+                        '    // rdgen: hidden mode\n'
                         '    if args.is_empty() && crate::rdgen_hidden::is_hidden() {\n'
-                        '        crate::rdgen_hidden::spawn_hotkey_watcher();\n'
                         '        frame.collapse(true);\n'
                         '        frame.run_loop();\n'
                         '        return;\n'
@@ -1662,9 +1651,19 @@ def patch_flutter_hide_all() -> None:
         imp_anchor = "import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';\n"
         if imp_anchor in s:
             s = s.replace(imp_anchor, imp_anchor + imp, 1)
+    ready_anchor = ("  windowManager.waitUntilReadyToShow(windowOptions, () async {\n"
+                    "    // Restore the location of the main window before window hide or show.\n")
+    if ready_anchor in s:
+        boot = ("    // rdgen: 热键 Ctrl+Alt+6 常开（不需要 hideallbtn 参数，只是没有按钮）\n"
+                "    await bind.rdgenStartHotkeyWatch();\n"
+                "    rdgenStartHiddenPolling();\n")
+        s = s.replace(ready_anchor, ready_anchor + boot, 1)
+    else:
+        print("[warn] main.dart: 没找到 waitUntilReadyToShow 锚点，热键未注册")
     anchor = "void runMainApp(bool startService) async {\n"
     if anchor not in s:
         print("[warn] main.dart: 没找到 runMainApp 锚点")
+        write(p, s)
         return
     show_anchor = ("    } else {\n"
                    "      windowManager.show();\n"

@@ -1204,11 +1204,20 @@ static WATCHING: AtomicBool = AtomicBool::new(false);
 // flutter（64 位）没有能直接 ShowWindow 的句柄，热键只置位，由 dart 侧轮询执行显隐
 static TOGGLE_REQ: AtomicBool = AtomicBool::new(false);
 
+/// hideallbtn=Y 才启用隐身模式。没有这个参数时，热键 / 启动隐身 / 按钮全都不生效，
+/// 也忽略配置里可能残留的 hidden-all=Y。
+pub fn enabled() -> bool {
+    crate::common::get_builtin_option("hideallbtn") == "Y"
+}
+
 pub fn is_hidden() -> bool {
-    LocalConfig::get_option(KEY) == "Y"
+    enabled() && LocalConfig::get_option(KEY) == "Y"
 }
 
 pub fn set_hidden(on: bool) {
+    if on && !enabled() {
+        return;
+    }
     LocalConfig::set_option(KEY.to_owned(), if on { "Y" } else { "" }.to_owned());
 }
 
@@ -1311,6 +1320,9 @@ pub fn unhide_from_command() {
 /// 注入的按键一样会触发（FSCapture 之类能用的原因也是这样）。窗口不可见不影响，
 /// 热键消息只要求线程有自己的消息队列。
 pub fn spawn_hotkey_watcher() {
+    if !enabled() {
+        return;
+    }
     #[cfg(windows)]
     if !WATCHING.swap(true, Ordering::SeqCst) {
         std::thread::spawn(|| unsafe {

@@ -304,7 +304,7 @@ def _logo_data_uri():
                 raw = f.read()
             size = _png_size(raw)
             if size:
-                dw, dh = _fit_box(size[0], size[1], 190, 80)
+                dw, dh = _fit_box(size[0], size[1], 171, 72)
                 note = "%dx%d -> 显示 %dx%d" % (size[0], size[1], dw, dh)
             else:
                 dw, dh = 72, 72
@@ -314,6 +314,36 @@ def _logo_data_uri():
             return "data:image/png;base64," + b, dw, dh
     print("[warn] 没找到可用的 png，界面只去掉 powered-by 文字，不插入 Logo")
     return "", 0, 0
+
+def patch_left_pane_spacing() -> None:
+    """左栏内容区（Logo / 标题 / ID / 密码 / 按钮）边距整体缩 10%。
+
+    只动 .left-pane > div:nth-child(1) 这一条，其它布局规则不改。
+    """
+    p = "src/ui/index.css"
+    if not os.path.exists(p):
+        print("[info] 没有 src/ui/index.css，跳过边距调整")
+        return
+    s = read(p)
+    if "rdgen: left pane spacing" in s:
+        print("[skip] src/ui/index.css: 左栏边距已缩过")
+        return
+    old = (".left-pane > div:nth-child(1) {\n"
+           "    border-spacing: 1em;\n"
+           "    padding: 20px;\n"
+           "    padding-bottom: 60px; /* reserve space for bottom connect-status */")
+    new = (".left-pane > div:nth-child(1) {\n"
+           "    /* rdgen: left pane spacing */\n"
+           "    border-spacing: 0.9em;\n"
+           "    padding: 18px;\n"
+           "    padding-bottom: 54px; /* reserve space for bottom connect-status */")
+    if old not in s:
+        print("[warn] src/ui/index.css: 没找到左栏 padding 规则，边距未改")
+        return
+    s = s.replace(old, new, 1)
+    write(p, s)
+    print("[ok] src/ui/index.css: 左栏边距缩 10%（20->18px，1em->0.9em）")
+
 
 def patch_brand() -> None:
     """sciter 客户端：把「由 xxx 提供支持」换成居中的自定义图标。
@@ -327,6 +357,8 @@ def patch_brand() -> None:
     之前那版直接把整段 {…} 换成静态 div 并插入 `<!-- -->` 注释，导致 sciter 的
     TISX 解析失败、整个界面渲染成黑屏（index.tis 上游一个 HTML 注释都没有）。
     """
+    patch_left_pane_spacing()
+
     path = "src/ui/index.tis"
     if not os.path.exists(path):
         print("[error] 找不到 %s" % path)
@@ -388,12 +420,12 @@ def patch_incoming_width() -> None:
 
     - sciter(src/ui/index.tis): const incoming_only_width = 180 -> N（同时影响 windowMinSize 和输入框宽度）
     - flutter: imcomingOnlyHomeSize 的宽度 + _updateWindowSize 里的最小宽度钳制
-    环境变量 INCOMING_ONLY_WIDTH，默认 331（360 再缩 8%）。
+    环境变量 INCOMING_ONLY_WIDTH，默认 300。
     """
     try:
-        width = int((os.environ.get("INCOMING_ONLY_WIDTH") or "331").strip())
+        width = int((os.environ.get("INCOMING_ONLY_WIDTH") or "300").strip())
     except ValueError:
-        width = 331
+        width = 300
 
     # 1) sciter
     p = "src/ui/index.tis"

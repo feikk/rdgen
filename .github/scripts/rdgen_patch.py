@@ -384,11 +384,44 @@ def patch_brand() -> None:
 
 
 
+def patch_flutter_incoming_fit() -> None:
+    """64 位 flutter：incoming-only 启动时总是按内容重算窗口尺寸。
+
+    上游 `_updateWindowSize()` 里只有 `size != imcomingOnlyHomeSize` 时才 setSize，
+    内容正好等于官方默认 280x300 时不会触发，窗口就沿用本地持久化的旧尺寸
+    （之前生成的 331/360 宽版本留下的），于是左栏 280 右侧空一大块。
+    这里保持官方的「按内容算尺寸」逻辑不变，只去掉那个相等判断（幂等）。
+    """
+    p = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 desktop_home_page.dart，跳过窗口自适应")
+        return
+    s = read(p)
+    if "rdgen: fit window" in s:
+        print("[skip] desktop_home_page.dart: 窗口尺寸自适应已存在")
+        return
+    old = ("      final size = renderObject.size;\n"
+           "      if (size != imcomingOnlyHomeSize) {\n"
+           "        imcomingOnlyHomeSize = size;\n"
+           "        windowManager.setSize(getIncomingOnlyHomeSize());\n"
+           "      }\n")
+    new = ("      final size = renderObject.size;\n"
+           "      imcomingOnlyHomeSize = size;\n"
+           "      // rdgen: fit window（每次都按内容设尺寸，避免沿用旧版窗口尺寸）\n"
+           "      windowManager.setSize(getIncomingOnlyHomeSize());\n")
+    if old not in s:
+        print("[warn] desktop_home_page.dart: 没找到 _updateWindowSize 原始代码，跳过")
+        return
+    s = s.replace(old, new, 1)
+    write(p, s)
+    print("[ok] desktop_home_page.dart: incoming-only 每次启动都按内容设窗口尺寸")
+
+
 def patch_incoming_width() -> None:
     """仅受控（incoming-only）客户端的窗口宽度。
 
     - sciter(src/ui/index.tis): const incoming_only_width = 180 -> N（同时影响 windowMinSize 和输入框宽度）
-    - flutter: imcomingOnlyHomeSize 的宽度 + _updateWindowSize 里的最小宽度钳制
+    - flutter: 仅 INCOMING_ONLY_PATCH_FLUTTER=1 时才改尺寸（默认走官方样式）
     环境变量 INCOMING_ONLY_WIDTH，默认 300。
     """
     try:
@@ -425,9 +458,9 @@ def patch_incoming_width() -> None:
         else:
             print("[info] flutter/lib/common.dart: 没匹配到 imcomingOnlyHomeSize")
 
-    # 3) flutter 首帧后按内容缩窗，补一个最小宽度钳制
+    # 3) flutter 首帧后按内容缩窗，补一个最小宽度钳制（64 位不启用，走官方默认）
     p = "flutter/lib/desktop/pages/desktop_home_page.dart"
-    if os.path.exists(p):
+    if os.path.exists(p) and os.environ.get("INCOMING_ONLY_PATCH_FLUTTER") == "1":
         s = read(p)
         marker = "size.width < %d" % width
         if marker in s:
@@ -1900,6 +1933,7 @@ def main() -> None:
         patch_no_install_tip()
     elif action == "incoming-width":
         patch_incoming_width()
+        patch_flutter_incoming_fit()
     elif action == "links":
         patch_links()
     elif action == "no-update-notif":

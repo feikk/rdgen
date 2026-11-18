@@ -1302,8 +1302,23 @@ pub fn enter_hidden_in_place() {
 pub fn exit_hidden_in_place() {
     set_hidden(false);
     show_main_window(true);
+    restore_tray();
     log::info!("rdgen: hidden mode off");
 }
+
+/// 从隐身恢复时把托盘进程拉回来（进隐身时被 kill 掉了）。
+#[cfg(windows)]
+fn restore_tray() {
+    if crate::check_process("--tray", true) {
+        return;
+    }
+    if let Err(e) = crate::run_me(vec!["--tray".to_owned()]) {
+        log::warn!("rdgen: restart tray failed: {e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn restore_tray() {}
 
 /// 命令行恢复：当前实例看不到别的进程的窗口句柄，所以清标记后重启自身进程；
 /// 结束其它实例时按 PID 排除自己，避免把刚拉起的进程一起杀掉。
@@ -1320,6 +1335,81 @@ pub fn unhide_from_command() {
     let _ = crate::run_me(Vec::<String>::new());
 }
 
+/// 热键默认 Ctrl+Alt+6；可在本地配置文件里用 `hidden-all-key=ctrl+alt+5` 覆盖，
+/// 重启程序生效。只支持 ctrl / alt / shift / win + 单个字母、数字或 F1~F12。
+#[cfg(windows)]
+fn hotkey_combo() -> (u32, u32, String) {
+    const DEFAULT_KEY: &str = "ctrl+alt+6";
+    let raw = LocalConfig::get_option("hidden-all-key");
+    let raw = raw.trim().to_owned();
+    let cfg = if raw.is_empty() { DEFAULT_KEY.to_owned() } else { raw };
+    match parse_hotkey(&cfg) {
+        Some((mods, vk)) => (mods, vk, cfg),
+        None => {
+            log::warn!("rdgen: bad hidden-all-key {:?}, fallback to {DEFAULT_KEY}", cfg);
+            let (mods, vk) = parse_hotkey(DEFAULT_KEY).unwrap();
+            (mods, vk, DEFAULT_KEY.to_owned())
+        }
+    }
+}
+
+#[cfg(windows)]
+fn parse_hotkey(s: &str) -> Option<(u32, u32)> {
+    use winapi::um::winuser::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN};
+    let mut mods: u32 = 0;
+    let mut vk: u32 = 0;
+    for part in s.split('+') {
+        let p = part.trim().to_ascii_lowercase();
+        if p.is_empty() {
+            continue;
+        }
+        match p.as_str() {
+            "ctrl" | "control" => mods |= MOD_CONTROL as u32,
+            "alt" => mods |= MOD_ALT as u32,
+            "shift" => mods |= MOD_SHIFT as u32,
+            "win" | "meta" | "super" => mods |= MOD_WIN as u32,
+            _ => {
+                if vk != 0 {
+                    return None;
+                }
+                vk = match p.as_str() {
+                    "f1" => 0x70,
+                    "f2" => 0x71,
+                    "f3" => 0x72,
+                    "f4" => 0x73,
+                    "f5" => 0x74,
+                    "f6" => 0x75,
+                    "f7" => 0x76,
+                    "f8" => 0x77,
+                    "f9" => 0x78,
+                    "f10" => 0x79,
+                    "f11" => 0x7a,
+                    "f12" => 0x7b,
+                    _ => {
+                        let mut it = p.chars();
+                        let c = it.next()?;
+                        if it.next().is_some() {
+                            return None;
+                        }
+                        if c.is_ascii_lowercase() {
+                            c.to_ascii_uppercase() as u32
+                        } else if c.is_ascii_digit() {
+                            c as u32
+                        } else {
+                            return None;
+                        }
+                    }
+                };
+            }
+        }
+    }
+    if vk == 0 || mods == 0 {
+        None
+    } else {
+        Some((mods | MOD_NOREPEAT as u32, vk))
+    }
+}
+
 /// 全局热键 Ctrl+Alt+6：按一下在「显示 / 隐身」之间切换。
 /// 用 RegisterHotKey 而不是 GetAsyncKeyState 轮询——被远程控制时按键是别的进程
 /// SendInput 注入的，GetAsyncKeyState 读不到；RegisterHotKey 走系统热键通道，
@@ -1334,19 +1424,17 @@ pub fn spawn_hotkey_watcher() {
         std::thread::spawn(|| unsafe {
             use winapi::um::winuser::{
                 DispatchMessageW, GetMessageW, RegisterHotKey, TranslateMessage, UnregisterHotKey,
-                MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MSG, WM_HOTKEY,
+                MSG, WM_HOTKEY,
             };
             const ID: i32 = 0x5244; // "RD"
-            const VK_6: u32 = 0x36;
-            // winapi 里 MOD_* 是 LPARAM(isize)，RegisterHotKey 要 u32，必须显式转换
-            let mods: u32 = (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT) as u32;
-            if RegisterHotKey(std::ptr::null_mut(), ID, mods, VK_6) == 0
+            let (mods, vk, label) = hotkey_combo();
+            if RegisterHotKey(std::ptr::null_mut(), ID, mods, vk) == 0
             {
-                log::warn!("rdgen: register Ctrl+Alt+6 failed (maybe taken)");
+                log::warn!("rdgen: register {label} failed (maybe taken)");
                 WATCHING.store(false, Ordering::SeqCst);
                 return;
             }
-            log::info!("rdgen: hotkey Ctrl+Alt+6 registered");
+            log::info!("rdgen: hotkey {label} registered");
             loop {
                 let mut msg: MSG = std::mem::zeroed();
                 let ret = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
@@ -1395,6 +1483,7 @@ pub fn set_hidden_from_ui(on: bool) {
         kill_tray();
     } else {
         set_hidden(false);
+        restore_tray();
     }
 }
 

@@ -1757,43 +1757,87 @@ def patch_flutter_hide_all() -> None:
     s = read(p)
     if "rdgenStartHiddenPolling" in s:
         print("[skip] main.dart: 隐身模式补丁已存在")
-        return
-    imp = "import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';\n"
-    if imp not in s:
-        imp_anchor = "import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';\n"
-        if imp_anchor in s:
-            s = s.replace(imp_anchor, imp_anchor + imp, 1)
-    ready_anchor = ("  windowManager.waitUntilReadyToShow(windowOptions, () async {\n"
-                    "    // Restore the location of the main window before window hide or show.\n")
-    if ready_anchor in s:
-        boot = ("    // rdgen: 热键 Ctrl+Alt+6 常开（不需要 hideallbtn 参数，只是没有按钮）\n"
-                "    await bind.rdgenStartHotkeyWatch();\n"
-                "    rdgenStartHiddenPolling();\n")
-        s = s.replace(ready_anchor, ready_anchor + boot, 1)
     else:
-        print("[warn] main.dart: 没找到 waitUntilReadyToShow 锚点，热键未注册")
-    anchor = "void runMainApp(bool startService) async {\n"
-    if anchor not in s:
-        print("[warn] main.dart: 没找到 runMainApp 锚点")
-        write(p, s)
+        imp = "import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';\n"
+        if imp not in s:
+            imp_anchor = "import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';\n"
+            if imp_anchor in s:
+                s = s.replace(imp_anchor, imp_anchor + imp, 1)
+        ready_anchor = ("  windowManager.waitUntilReadyToShow(windowOptions, () async {\n"
+                        "    // Restore the location of the main window before window hide or show.\n")
+        if ready_anchor in s:
+            boot = ("    // rdgen: 热键 Ctrl+Alt+6 常开（不需要 hideallbtn 参数，只是没有按钮）\n"
+                    "    await bind.rdgenStartHotkeyWatch();\n"
+                    "    rdgenStartHiddenPolling();\n")
+            s = s.replace(ready_anchor, ready_anchor + boot, 1)
+        else:
+            print("[warn] main.dart: 没找到 waitUntilReadyToShow 锚点，热键未注册")
+        show_anchor = ("    } else {\n"
+                       "      windowManager.show();\n"
+                       "      windowManager.focus();\n")
+        if show_anchor not in s:
+            write(p, s)
+            print("[warn] main.dart: 没找到显示窗口分支，只加了工具函数")
+        else:
+            hide_branch = ("    } else if (bind.rdgenIsHidden()) {\n"
+                           "      // rdgen: 启动即隐身\n"
+                           "      await bind.rdgenStartHotkeyWatch();\n"
+                           "      rdgenStartHiddenPolling();\n"
+                           "      windowManager.setOpacity(1);\n"
+                           "      windowManager.setTitle(getWindowName());\n"
+                           "      windowManager.hide();\n")
+            s = s.replace(show_anchor, hide_branch + show_anchor, 1)
+            write(p, s)
+            print("[ok] main.dart: 启动隐身 + 热键轮询")
+
+    # 连接管理窗口（CM）：隐身模式下启动就隐藏，不信 ipc 的 hide_cm 查询结果
+    s = read(p)
+    if "rdgen: cm hide" in s:
+        print("[skip] main.dart: CM 窗口隐身判断已存在")
+    else:
+        old_hide = ("  final hide = await bind.cmGetConfig(name: \"hide_cm\") == 'true';\n")
+        new_hide = ("  // rdgen: cm hide（隐身模式下连接窗口也要藏起来）\n"
+                    "  final hide = await bind.cmGetConfig(name: \"hide_cm\") == 'true' ||\n"
+                    "      bind.rdgenIsHidden();\n")
+        if old_hide in s:
+            s = s.replace(old_hide, new_hide, 1)
+            write(p, s)
+            print("[ok] main.dart: 隐身模式下 CM 窗口启动即隐藏")
+        else:
+            print("[warn] main.dart: 没找到 cmGetConfig 锚点，CM 窗口未接隐身")
+
+    p = "flutter/lib/models/server_model.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 server_model.dart，跳过 CM 窗口隐身")
         return
-    show_anchor = ("    } else {\n"
-                   "      windowManager.show();\n"
-                   "      windowManager.focus();\n")
-    if show_anchor not in s:
-        write(p, s)
-        print("[warn] main.dart: 没找到显示窗口分支，只加了工具函数")
+    s = read(p)
+    if "_rdgenHideCm" in s:
+        print("[skip] server_model.dart: CM 窗口隐身补丁已存在")
         return
-    hide_branch = ("    } else if (bind.rdgenIsHidden()) {\n"
-                   "      // rdgen: 启动即隐身\n"
-                   "      await bind.rdgenStartHotkeyWatch();\n"
-                   "      rdgenStartHiddenPolling();\n"
-                   "      windowManager.setOpacity(1);\n"
-                   "      windowManager.setTitle(getWindowName());\n"
-                   "      windowManager.hide();\n")
-    s = s.replace(show_anchor, hide_branch + show_anchor, 1)
+    old_field = "  bool hideCm = false;\n"
+    new_field = ("  bool _rdgenHideCm = false;\n"
+                 "  // rdgen: 隐身模式下 CM 窗口一定不显示\n"
+                 "  bool get hideCm => _rdgenHideCm || bind.rdgenIsHidden();\n"
+                 "  set hideCm(bool v) {\n"
+                 "    _rdgenHideCm = v;\n"
+                 "  }\n")
+    if old_field not in s:
+        print("[warn] server_model.dart: 没找到 hideCm 字段锚点")
+        return
+    s = s.replace(old_field, new_field, 1)
+    old_timer = ("      if (desktopType == DesktopType.cm) {\n"
+                 "        final res = await bind.cmCheckClientsLength(length: _clients.length);\n")
+    new_timer = ("      if (desktopType == DesktopType.cm && bind.rdgenIsHidden()) {\n"
+                 "        await hideCmWindow();\n"
+                 "      }\n"
+                 "      if (desktopType == DesktopType.cm) {\n"
+                 "        final res = await bind.cmCheckClientsLength(length: _clients.length);\n")
+    if old_timer in s:
+        s = s.replace(old_timer, new_timer, 1)
+    else:
+        print("[warn] server_model.dart: 没找到 timer 锚点，运行中进入隐身不会自动收起 CM")
     write(p, s)
-    print("[ok] main.dart: 启动隐身 + 热键轮询")
+    print("[ok] server_model.dart: 隐身模式下 CM 窗口始终隐藏")
 
 
 def main() -> None:

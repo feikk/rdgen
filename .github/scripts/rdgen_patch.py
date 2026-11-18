@@ -689,6 +689,57 @@ RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
                    '}\n\n')
 
 
+RG_INSTALL_MARKUP = ('                        {!outgoing_only && is_win && !handler.is_installed() && !disable_installation'
+                    ' && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 8px 0 6px 0">'
+                    '<button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">'
+                    '&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n')
+
+RG_INSTALL_HANDLER = ('event click $(button#rdgen-install) {\n'
+                      '    handler.goto_install();\n'
+                      '}\n\n')
+
+
+def patch_install_button() -> None:
+    """installbtn=Y 时左栏多一个「安装到本机」按钮。
+
+    样式与「复制 ID 和密码」一致（.button .outline、38px 高、* 宽），
+    动作直接复用帮助提示卡片里那个安装按钮的 `handler.goto_install()`。
+    只在 Windows、未安装（即便携运行）、未禁用安装时显示。
+    """
+    p = "src/ui/index.tis"
+    if not os.path.exists(p):
+        print("[info] 没有 src/ui/index.tis，跳过安装按钮")
+        return
+    s = read(p)
+    if "rdgen-install" in s:
+        print("[skip] src/ui/index.tis: 安装按钮已存在")
+        return
+    anchors = [RG_ADMIN_MARKUP,
+               RG_COPY_MARKUP,
+               "                        {!outgoing_only && <PasswordArea />}\n"]
+    placed = False
+    for a in anchors:
+        if a in s:
+            s = s.replace(a, a + RG_INSTALL_MARKUP, 1)
+            placed = True
+            break
+    if not placed:
+        print("[warn] src/ui/index.tis: 没找到插入点，安装按钮未加入")
+        return
+    if RG_ADMIN_HANDLER in s:
+        s = s.replace(RG_ADMIN_HANDLER, RG_ADMIN_HANDLER + RG_INSTALL_HANDLER, 1)
+    elif RG_COPY_HANDLER in s:
+        s = s.replace(RG_COPY_HANDLER, RG_COPY_HANDLER + RG_INSTALL_HANDLER, 1)
+    elif "\nfunction updatePasswordArea() {" in s:
+        s = s.replace("\nfunction updatePasswordArea() {",
+                      "\n" + RG_INSTALL_HANDLER + "function updatePasswordArea() {", 1)
+    else:
+        print("[warn] src/ui/index.tis: 没找到事件处理插入点，安装按钮未加入")
+        return
+    write(p, s)
+    print("[ok] src/ui/index.tis: 已加入安装到本机按钮（installbtn=Y 时显示）")
+
+
 def patch_copy_credentials() -> None:
     """仅受控客户端左栏下方加一个「复制 ID 和密码」按钮。
 
@@ -1405,14 +1456,22 @@ pub fn unhide_from_command() {
     let _ = crate::run_me(Vec::<String>::new());
 }
 
-/// 热键默认 Ctrl+Alt+6；可在本地配置文件里用 `hidden-all-key=ctrl+alt+5` 覆盖，
-/// 重启程序生效。只支持 ctrl / alt / shift / win + 单个字母、数字或 F1~F12。
+/// 热键默认 Ctrl+Alt+6；构建参数 `hideall-key=ctrl+alt+5` 可改默认值，
+/// 本地配置文件里的 `hidden-all-key` 仍优先，重启程序生效。
+/// 只支持 ctrl / alt / shift / win + 单个字母、数字或 F1~F12。
 #[cfg(windows)]
 fn hotkey_combo() -> (u32, u32, String) {
     const DEFAULT_KEY: &str = "ctrl+alt+6";
     let raw = LocalConfig::get_option("hidden-all-key");
     let raw = raw.trim().to_owned();
-    let cfg = if raw.is_empty() { DEFAULT_KEY.to_owned() } else { raw };
+    let cfg = if !raw.is_empty() {
+        raw
+    } else {
+        // 本地配置没写时才用构建时写进 exe 的默认值（hideall-key）
+        let builtin = crate::common::get_builtin_option("hideall-key");
+        let builtin = builtin.trim().to_owned();
+        if builtin.is_empty() { DEFAULT_KEY.to_owned() } else { builtin }
+    };
     match parse_hotkey(&cfg) {
         Some((mods, vk)) => (mods, vk, cfg),
         None => {
@@ -1916,6 +1975,7 @@ def main() -> None:
         patch_brand()
     elif action == "copy-credentials":
         patch_copy_credentials()
+        patch_install_button()
     elif action == "flutter-ffi":
         patch_flutter_ffi_only()
     elif action == "flutter-copy-credentials":

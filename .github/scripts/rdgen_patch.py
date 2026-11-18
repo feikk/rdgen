@@ -388,12 +388,12 @@ def patch_incoming_width() -> None:
 
     - sciter(src/ui/index.tis): const incoming_only_width = 180 -> N（同时影响 windowMinSize 和输入框宽度）
     - flutter: imcomingOnlyHomeSize 的宽度 + _updateWindowSize 里的最小宽度钳制
-    环境变量 INCOMING_ONLY_WIDTH，默认 360。
+    环境变量 INCOMING_ONLY_WIDTH，默认 331（360 再缩 8%）。
     """
     try:
-        width = int((os.environ.get("INCOMING_ONLY_WIDTH") or "360").strip())
+        width = int((os.environ.get("INCOMING_ONLY_WIDTH") or "331").strip())
     except ValueError:
-        width = 360
+        width = 331
 
     # 1) sciter
     p = "src/ui/index.tis"
@@ -407,9 +407,9 @@ def patch_incoming_width() -> None:
         else:
             print("[info] src/ui/index.tis: 没找到 incoming_only_width，未改动（可能不是 sciter 客户端）")
 
-    # 2) flutter 默认尺寸
+    # 2) flutter 默认尺寸：仅当显式要求时才改，64 位默认用官方样式
     p = "flutter/lib/common.dart"
-    if os.path.exists(p):
+    if os.path.exists(p) and os.environ.get("INCOMING_ONLY_PATCH_FLUTTER") == "1":
         s = read(p)
         try:
             height = int((os.environ.get("INCOMING_ONLY_HEIGHT") or "350").strip())
@@ -519,6 +519,37 @@ def patch_no_install_tip() -> None:
     if old_center in s:
         s = s.replace(old_center, "scaleIt(incoming_only ? %d : 600)" % h, 1)
         print("[ok] src/ui/index.tis: incoming-only initial height -> %d" % h)
+
+    # 2b) 启动后按实际内容高度再撑一次（最低 h），内容多时按钮/帮助卡不会被裁掉
+    if "rdgen: auto height" not in s:
+        rc_anchor = "    if (!handler.get_remote_id()) {\n"
+        rc_code = ("    // rdgen: auto height (incoming-only, min %d)\n" % h
+                   + "    if (incoming_only) {\n"
+                   + "        self.timer(80ms, function() {\n"
+                   + "            try {\n"
+                   + "                var need = scaleIt(%d);\n" % h
+                   + "                var pane = $(div.app > div.left-pane);\n"
+                   + "                if (pane && pane.children) {\n"
+                   + "                    var total = 0;\n"
+                   + "                    var kids = pane.children;\n"
+                   + "                    for (var i = 0; i < kids.length; ++i) {\n"
+                   + "                        var el = kids[i];\n"
+                   + "                        if (el.style#position == 'absolute') continue;\n"
+                   + "                        var hh = el.box(#height, #border);\n"
+                   + "                        if (hh > 0) total += hh;\n"
+                   + "                    }\n"
+                   + "                    if (total + scaleIt(8) > need) need = total + scaleIt(8);\n"
+                   + "                }\n"
+                   + "                var (dx, dy, dw, dh) = view.box(#rectw, #border);\n"
+                   + "                if (need > dh) view.move(dx, dy - (need - dh) / 2, dw, need);\n"
+                   + "            } catch (e) { }\n"
+                   + "        });\n"
+                   + "    }\n")
+        if rc_anchor in s:
+            s = s.replace(rc_anchor, rc_code + rc_anchor, 1)
+            print("[ok] src/ui/index.tis: incoming-only 高度自适应（最低 %d）" % h)
+        else:
+            print("[warn] src/ui/index.tis: 没找到 ready 尾部锚点，高度自适应未加")
 
     # 3) 恢复上次保存的窗口尺寸时抬到 h（老用户本地存的是旧高度）
     if "rdgen: force min height" not in s:

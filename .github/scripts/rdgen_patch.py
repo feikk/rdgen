@@ -1277,11 +1277,14 @@ fn kill_tray() {
     if pids.is_empty() {
         return;
     }
+    // CREATE_NO_WINDOW：taskkill 是控制台程序，不加这个参数会闪一下黑框
+    use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("taskkill");
     cmd.arg("/F");
     for p in pids.iter() {
         cmd.arg("/PID").arg(p.as_u32().to_string());
     }
+    cmd.creation_flags(0x0800_0000);
     let _ = cmd.output();
 }
 
@@ -1326,11 +1329,13 @@ pub fn unhide_from_command() {
     set_hidden(false);
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let pid = std::process::id();
         let exe = format!("{}.exe", crate::get_app_name());
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/FI", &format!("PID ne {}", pid), "/IM", &exe])
-            .output();
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/F", "/FI", &format!("PID ne {}", pid), "/IM", &exe]);
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let _ = cmd.output();
     }
     let _ = crate::run_me(Vec::<String>::new());
 }

@@ -690,7 +690,7 @@ RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
 
 
 RG_INSTALL_MARKUP = ('                        {!outgoing_only && is_win && !handler.is_installed() && !disable_installation'
-                    ' && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 8px 0 6px 0">'
+                    ' && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 0 0 6px 0">'
                     '<button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">'
                     '&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n')
 
@@ -1026,6 +1026,63 @@ def patch_flutter_ffi_only() -> None:
     write(p, s)
     print("[ok] src/flutter_ffi.rs: 新增 rdgen_is_elevated / rdgen_run_as_admin")
     ensure_hidden_module()
+
+
+RG_FLUTTER_INSTALL_METHOD = """
+  Widget buildRdgenInstallButton() {
+    if (bind.mainGetBuildinOption(key: 'installbtn') != 'Y') return SizedBox();
+    if (!isWindows) return SizedBox();
+    if (bind.isDisableInstallation()) return SizedBox();
+    if (bind.mainIsInstalled()) return SizedBox();
+    return Padding(
+      padding: const EdgeInsets.only(left: 20.0, right: 16, bottom: 10),
+      child: SizedBox(
+        width: double.infinity,
+        height: 38,
+        child: OutlinedButton(
+          onPressed: () async {
+            await rustDeskWinManager.closeAllSubWindows();
+            bind.mainGotoInstall();
+          },
+          child: Text('\u5b89\u88c5\u5230\u672c\u673a', style: TextStyle(fontSize: 14)),
+        ),
+      ),
+    );
+  }
+
+"""
+
+
+def patch_flutter_install_button() -> None:
+    """64 位 flutter：installbtn=Y 时左栏加「安装到本机」按钮。
+
+    显示条件与 32 位一致：Windows + 便携运行（未安装）+ 未禁用安装。
+    动作等同帮助卡片里的安装按钮：先关子窗口再 mainGotoInstall()。
+    """
+    p = "flutter/lib/desktop/pages/desktop_home_page.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 desktop_home_page.dart，跳过 flutter 安装按钮")
+        return
+    s = read(p)
+    if "buildRdgenInstallButton" in s:
+        print("[skip] desktop_home_page.dart: 安装按钮已存在")
+        return
+    anchor_method = "\n  buildPasswordBoard(BuildContext context) {"
+    if anchor_method not in s:
+        print("[warn] desktop_home_page.dart: 没找到 buildPasswordBoard，安装按钮未插入")
+        return
+    s = s.replace(anchor_method, "\n" + RG_FLUTTER_INSTALL_METHOD + "  buildPasswordBoard(BuildContext context) {", 1)
+    copy_call = "      if (!isOutgoingOnly && bind.mainGetBuildinOption(key: 'copybtn') == 'Y') buildRdgenCopyButton(),\n"
+    pass_call = "      if (!isOutgoingOnly) buildPasswordBoard(context),\n"
+    if copy_call in s:
+        s = s.replace(copy_call, copy_call + "      if (!isOutgoingOnly) buildRdgenInstallButton(),\n", 1)
+    elif pass_call in s:
+        s = s.replace(pass_call, pass_call + "      if (!isOutgoingOnly) buildRdgenInstallButton(),\n", 1)
+    else:
+        print("[warn] desktop_home_page.dart: 没找到左栏 children 插入点，安装按钮未插入")
+        return
+    write(p, s)
+    print("[ok] desktop_home_page.dart: 已加入安装到本机按钮（installbtn=Y 时显示）")
 
 
 def patch_flutter_run_as_admin() -> None:
@@ -1976,11 +2033,13 @@ def main() -> None:
     elif action == "copy-credentials":
         patch_copy_credentials()
         patch_install_button()
+        patch_flutter_install_button()
     elif action == "flutter-ffi":
         patch_flutter_ffi_only()
     elif action == "flutter-copy-credentials":
         patch_flutter_copy_button()
         patch_flutter_run_as_admin()
+        patch_flutter_install_button()
     elif action == "run-as-admin":
         patch_ps_elevate_launch()
     elif action == "hide-all":

@@ -383,9 +383,9 @@ def patch_brand() -> None:
     print("[ok] src/ui/index.tis: 已移除 powered-by%s" % ("，并在原位居中显示 Logo" if logo else ""))
 
 
-RG_ONLYID_METHOD = '    function buildOnlyId() {\n        return\n            <div .app>\n                <div .left-pane style="width:*; position:relative">\n                    <div style="border-spacing:0.9em; padding:16px 18px 52px 18px;">\n                        <div .your-desktop>\n                            <div>ID</div>\n                            {key_confirmed ? <input type="text" readonly value={formatId(get_id())}/> : translate("Generating ...")}\n                        </div>\n                        {handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n                        {is_win && !handler.is_installed() && !disable_installation && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() && handler.get_builtin_option("prebtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-run-as-admin .button .outline style="width:*; height:34px; font-size:1em">&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n                        {!outgoing_only && handler.get_builtin_option("hideallbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-hide-all .button .outline style="width:*; height:34px; font-size:1em">&#38544;&#36523;&#27169;&#24335;</button></div> : ""}\n                        <div style="padding: 10px 0 0 0"><button #rdgen-onlyid-ok .button .outline style="width:*; height:38px; font-size:1em">&#30693;&#36947;&#20102;</button></div>\n                    </div>\n                    <ConnectStatus @{this.connect_status} />\n                </div>\n                <div #overlay style="position: absolute;size:*;background:black;opacity:0.5;display:none" />\n            </div>;\n    }\n\n'
+RG_ONLYID_METHOD = '    function buildOnlyId() {\n        return\n            <div .app>\n                <div .left-pane style="width:*; position:relative">\n                    <div style="border-spacing:0.9em; padding:16px 18px 52px 18px;">\n                        <div .your-desktop>\n                            <div>ID</div>\n                            {key_confirmed ? <input type="text" readonly value={formatId(get_id())}/> : translate("Generating ...")}\n                        </div>\n                        {handler.get_builtin_option("olnyidpwd") == "Y" ? <div .your-desktop>\n                            <div>{translate("One-time Password")}</div>\n                            <div .password style="flow:horizontal">\n                                <PasswordEyeArea @{this.pwd_eye} />\n                            </div>\n                        </div> : ""}\n                        {handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n                        {is_win && !handler.is_installed() && !disable_installation && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() && handler.get_builtin_option("prebtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-run-as-admin .button .outline style="width:*; height:34px; font-size:1em">&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n                        {!outgoing_only && handler.get_builtin_option("hideallbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-hide-all .button .outline style="width:*; height:34px; font-size:1em">&#38544;&#36523;&#27169;&#24335;</button></div> : ""}\n                        <div style="padding: 10px 0 0 0"><button #rdgen-onlyid-ok .button .outline style="width:*; height:38px; font-size:1em">&#30693;&#36947;&#20102;</button></div>\n                    </div>\n                    <ConnectStatus @{this.connect_status} />\n                </div>\n                <div #overlay style="position: absolute;size:*;background:black;opacity:0.5;display:none" />\n            </div>;\n    }\n\n'
 
-RG_ONLYID_READY = '    // rdgen: only id window size (auto height, min 160)\n    if (handler.get_builtin_option("olnyid") == "Y") {\n        self.timer(80ms, function() {\n            try {\n                var need = scaleIt(160);\n                var pane = $(div.app > div.left-pane);\n                if (pane && pane.children) {\n                    var total = 0;\n                    var kids = pane.children;\n                    for (var i = 0; i < kids.length; ++i) {\n                        var el = kids[i];\n                        if (el.style#position == \'absolute\') continue;\n                        var rgh = el.box(#height, #border);\n                        if (rgh > 0) total += rgh;\n                    }\n                    if (total + scaleIt(8) > need) need = total + scaleIt(8);\n                }\n                var (dx, dy, dw, dh) = view.box(#rectw, #border);\n                view.move(dx, dy, scaleIt(300), need);\n            } catch (e) { }\n        });\n    }\n'
+RG_ONLYID_READY = '    // rdgen: only id window size (auto height, min 160)\n    if (handler.get_builtin_option("olnyid") == "Y"\n            || handler.get_builtin_option("olnyidpwd") == "Y") {\n        self.timer(80ms, function() {\n            try {\n                var need = scaleIt(160);\n                var pane = $(div.app > div.left-pane);\n                if (pane && pane.children) {\n                    var total = 0;\n                    var kids = pane.children;\n                    for (var i = 0; i < kids.length; ++i) {\n                        var el = kids[i];\n                        if (el.style#position == \'absolute\') continue;\n                        var rgh = el.box(#height, #border);\n                        if (rgh > 0) total += rgh;\n                    }\n                    if (total + scaleIt(8) > need) need = total + scaleIt(8);\n                }\n                var (dx, dy, dw, dh) = view.box(#rectw, #border);\n                view.move(dx, dy, scaleIt(300), need);\n            } catch (e) { }\n        });\n    }\n'
 
 
 def patch_only_id() -> None:
@@ -433,7 +433,8 @@ def patch_only_id() -> None:
     min_anchor = "} else {\n  view.windowMinSize = (560, 300);\n}\n"
     if min_anchor in s:
         s = s.replace(min_anchor, min_anchor
-                      + 'if (handler.get_builtin_option("olnyid") == "Y") {\n'
+                      + 'if (handler.get_builtin_option("olnyid") == "Y"\n'
+                      + '        || handler.get_builtin_option("olnyidpwd") == "Y") {\n'
                       + "  view.windowMinSize = (300, 160);\n"
                       + "}\n", 1)
         print("[ok] src/ui/index.tis: only-id 最小窗口 300x160")
@@ -444,7 +445,8 @@ def patch_only_id() -> None:
                      "        var is_can_screen_recording = handler.is_can_screen_recording(false);\n")
     if render_anchor in s:
         s = s.replace(render_anchor, render_anchor
-                      + '        if (handler.get_builtin_option("olnyid") == "Y") return self.buildOnlyId();\n', 1)
+                      + '        if (handler.get_builtin_option("olnyid") == "Y"\n'
+                      + '                || handler.get_builtin_option("olnyidpwd") == "Y") return self.buildOnlyId();\n', 1)
         print("[ok] src/ui/index.tis: only-id 精简界面已接管 render")
     else:
         print("[warn] src/ui/index.tis: 没找到 App.render 锚点，界面未切换")
@@ -458,6 +460,11 @@ def patch_only_id() -> None:
         print("[ok] src/ui/index.tis: 已加入 only-id 精简界面与「知道了」按钮")
     else:
         print("[warn] src/ui/index.tis: 没找到 App 内锚点，界面未加入")
+
+    up = "        if (update && passwordArea) passwordArea.update();\n"
+    if up in s and "pwd_eye.update()" not in s:
+        s = s.replace(up, up
+                      + "        if (update && app && app.pwd_eye) app.pwd_eye.update();\n", 1)
 
     ready_anchor = "    if (!handler.get_remote_id()) {\n"
     if ready_anchor in s and "rdgen: only id window size" not in s:

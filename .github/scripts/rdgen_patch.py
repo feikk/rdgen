@@ -383,6 +383,92 @@ def patch_brand() -> None:
     print("[ok] src/ui/index.tis: 已移除 powered-by%s" % ("，并在原位居中显示 Logo" if logo else ""))
 
 
+RG_ONLYID_METHOD = '    function buildOnlyId() {\n        return\n            <div .app>\n                <div .left-pane style="width:*; position:relative">\n                    <div style="border-spacing:0.9em; padding:16px 18px 52px 18px;">\n                        <div .your-desktop>\n                            <div>ID</div>\n                            {key_confirmed ? <input type="text" readonly value={formatId(get_id())}/> : translate("Generating ...")}\n                        </div>\n                        {handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n                        {is_win && !handler.is_installed() && !disable_installation && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n                        {!outgoing_only && !handler.is_installed() && !handler.rdgen_is_elevated() && handler.get_builtin_option("prebtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-run-as-admin .button .outline style="width:*; height:34px; font-size:1em">&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n                        {!outgoing_only && handler.get_builtin_option("hideallbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-hide-all .button .outline style="width:*; height:34px; font-size:1em">&#38544;&#36523;&#27169;&#24335;</button></div> : ""}\n                        <div style="padding: 10px 0 0 0"><button #rdgen-onlyid-ok .button .outline style="width:*; height:38px; font-size:1em">&#30693;&#36947;&#20102;</button></div>\n                    </div>\n                    <ConnectStatus @{this.connect_status} />\n                </div>\n                <div #overlay style="position: absolute;size:*;background:black;opacity:0.5;display:none" />\n            </div>;\n    }\n\n'
+
+RG_ONLYID_READY = '    // rdgen: only id window size (auto height, min 160)\n    if (handler.get_builtin_option("olnyid") == "Y") {\n        self.timer(80ms, function() {\n            try {\n                var need = scaleIt(160);\n                var pane = $(div.app > div.left-pane);\n                if (pane && pane.children) {\n                    var total = 0;\n                    var kids = pane.children;\n                    for (var i = 0; i < kids.length; ++i) {\n                        var el = kids[i];\n                        if (el.style#position == \'absolute\') continue;\n                        var rgh = el.box(#height, #border);\n                        if (rgh > 0) total += rgh;\n                    }\n                    if (total + scaleIt(8) > need) need = total + scaleIt(8);\n                }\n                var (dx, dy, dw, dh) = view.box(#rectw, #border);\n                view.move(dx, dy, scaleIt(300), need);\n            } catch (e) { }\n        });\n    }\n'
+
+
+def patch_only_id() -> None:
+    """olnyid=Y：界面只留 ID（可选中复制）、各可选按钮和「知道了」，点了收进托盘。"""
+    ensure_hidden_module()
+
+    p = "src/ui.rs"
+    if os.path.exists(p):
+        s = read(p)
+        if "rdgen_hide_to_tray" not in s:
+            anchor = "    fn rdgen_run_as_admin(&self) {"
+            method = ('    fn rdgen_hide_to_tray(&self) {\n'
+                      '        #[cfg(target_os = "windows")]\n'
+                      '        crate::rdgen_hidden::hide_to_tray();\n'
+                      '    }\n\n')
+            if anchor in s:
+                s = s.replace(anchor, method + anchor, 1)
+                decl = "        fn rdgen_run_as_admin();\n"
+                if decl in s:
+                    s = s.replace(decl, decl + "        fn rdgen_hide_to_tray();\n", 1)
+                write(p, s)
+                print("[ok] src/ui.rs: 新增 handler.rdgen_hide_to_tray")
+            else:
+                print("[warn] src/ui.rs: 没找到 rdgen_run_as_admin 锚点，托盘隐藏接口未加")
+        s = read(p)
+        if "rdgen: record hwnd" not in s:
+            anchor2 = "    frame.set_title(&crate::get_app_name());\n"
+            if anchor2 in s:
+                s = s.replace(anchor2, anchor2
+                              + "    // rdgen: record hwnd\n"
+                              + "    #[cfg(windows)]\n"
+                              + "    crate::rdgen_hidden::set_main_window_handle(frame.get_hwnd() as isize);\n", 1)
+                write(p, s)
+                print("[ok] src/ui.rs: 记录主窗口句柄")
+
+    p = "src/ui/index.tis"
+    if not os.path.exists(p):
+        print("[info] 没有 src/ui/index.tis，跳过 only-id")
+        return
+    s = read(p)
+    if "rdgen-onlyid-ok" in s:
+        print("[skip] src/ui/index.tis: only-id 界面已存在")
+        return
+
+    min_anchor = "} else {\n  view.windowMinSize = (560, 300);\n}\n"
+    if min_anchor in s:
+        s = s.replace(min_anchor, min_anchor
+                      + 'if (handler.get_builtin_option("olnyid") == "Y") {\n'
+                      + "  view.windowMinSize = (300, 160);\n"
+                      + "}\n", 1)
+        print("[ok] src/ui/index.tis: only-id 最小窗口 300x160")
+    else:
+        print("[warn] src/ui/index.tis: 没找到 windowMinSize 锚点")
+
+    render_anchor = ("    function render() {\n"
+                     "        var is_can_screen_recording = handler.is_can_screen_recording(false);\n")
+    if render_anchor in s:
+        s = s.replace(render_anchor, render_anchor
+                      + '        if (handler.get_builtin_option("olnyid") == "Y") return self.buildOnlyId();\n', 1)
+        print("[ok] src/ui/index.tis: only-id 精简界面已接管 render")
+    else:
+        print("[warn] src/ui/index.tis: 没找到 App.render 锚点，界面未切换")
+
+    app_anchor = "    event click $(button#connect) {\n"
+    ok_handler = ('    event click $(button#rdgen-onlyid-ok) {\n'
+                  '        handler.rdgen_hide_to_tray();\n'
+                  '    }\n\n')
+    if app_anchor in s:
+        s = s.replace(app_anchor, RG_ONLYID_METHOD + ok_handler + app_anchor, 1)
+        print("[ok] src/ui/index.tis: 已加入 only-id 精简界面与「知道了」按钮")
+    else:
+        print("[warn] src/ui/index.tis: 没找到 App 内锚点，界面未加入")
+
+    ready_anchor = "    if (!handler.get_remote_id()) {\n"
+    if ready_anchor in s and "rdgen: only id window size" not in s:
+        s = s.replace(ready_anchor, RG_ONLYID_READY + ready_anchor, 1)
+        print("[ok] src/ui/index.tis: only-id 启动时按内容收缩窗口")
+
+    if "<!--" in s:
+        print("[warn] 补丁结果里出现 HTML 注释，放弃写入")
+        return
+    write(p, s)
+
 
 def patch_flutter_incoming_fit() -> None:
     """64 位 flutter：incoming-only 启动时总是按内容重算窗口尺寸。
@@ -1430,6 +1516,32 @@ pub fn hide_main_window_now() {
     show_main_window(false);
 }
 
+/// 「知道了」按钮：隐藏主窗口，只留托盘图标（托盘被禁用时退化为最小化）。
+#[cfg(windows)]
+pub fn hide_to_tray() {
+    let hide_tray = crate::common::get_builtin_option("hide-tray") == "Y";
+    if !hide_tray && !crate::check_process("--tray", true) {
+        let _ = crate::run_me(vec!["--tray".to_owned()]);
+    }
+    let hwnd = MAIN_HWND.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        return;
+    }
+    unsafe {
+        winapi::um::winuser::ShowWindow(
+            hwnd as _,
+            if hide_tray {
+                winapi::um::winuser::SW_MINIMIZE
+            } else {
+                winapi::um::winuser::SW_HIDE
+            },
+        );
+    }
+}
+
+#[cfg(not(windows))]
+pub fn hide_to_tray() {}
+
 /// 结束托盘进程（托盘是独立的 `--tray` 进程，按命令行参数精确匹配，避免误杀自身）。
 /// 32 位构建走 wmic（sysinfo 读不到 32 位进程的命令行），64 位走 sysinfo。
 #[cfg(windows)]
@@ -2034,6 +2146,7 @@ def main() -> None:
         patch_copy_credentials()
         patch_install_button()
         patch_flutter_install_button()
+        patch_only_id()
     elif action == "flutter-ffi":
         patch_flutter_ffi_only()
     elif action == "flutter-copy-credentials":

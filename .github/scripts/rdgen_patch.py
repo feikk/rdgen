@@ -383,7 +383,7 @@ def patch_brand() -> None:
     print("[ok] src/ui/index.tis: 已移除 powered-by%s" % ("，并在原位居中显示 Logo" if logo else ""))
 
 
-RG_ONLYID_HELPERS = 'function rdgen_only_id_on() { return handler.get_builtin_option("olnyid") == "Y" || handler.get_builtin_option("onlyid") == "Y" || handler.get_builtin_option("olnyidpwd") == "Y" || handler.get_builtin_option("onlyidpwd") == "Y"; }\nfunction rdgen_only_id_pwd_on() { return handler.get_builtin_option("olnyidpwd") == "Y" || handler.get_builtin_option("onlyidpwd") == "Y"; }\n\n'
+RG_ONLYID_HELPERS = 'function rdgen_only_id_on() { return handler.get_builtin_option("onlyid") == "Y" || handler.get_builtin_option("onlyidpwd") == "Y"; }\nfunction rdgen_only_id_pwd_on() { return handler.get_builtin_option("onlyidpwd") == "Y"; }\n\n'
 
 RG_ONLYID_METHOD = '    function buildOnlyId() {\n        return\n            <div .app>\n                <div .left-pane style="width:*; position:relative">\n                    <div style="border-spacing:0.9em; padding:16px 18px 52px 18px;">\n                        <div .your-desktop>\n                            <div>ID</div>\n                            {key_confirmed ? <input type="text" readonly value={formatId(get_id())}/> : translate("Generating ...")}\n                        </div>\n                        {rdgen_only_id_pwd_on() ? <div .your-desktop>\n                            <div>{translate("One-time Password")}</div>\n                            <div .password style="flow:horizontal">\n                                <PasswordEyeArea @{this.pwd_eye} />\n                            </div>\n                        </div> : ""}\n                        {handler.get_builtin_option("copybtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-copy-credentials .button .outline style="width:*; height:38px; font-size:1em">&#22797;&#21046; ID &#21644;&#23494;&#30721;</button></div> : ""}\n                        {handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n                        {handler.get_builtin_option("prebtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-run-as-admin .button .outline style="width:*; height:34px; font-size:1em">&#31649;&#29702;&#21592;&#26435;&#38480;&#36816;&#34892;</button></div> : ""}\n                        {handler.get_builtin_option("hideallbtn") == "Y" ? <div style="padding: 6px 0 0 0"><button #rdgen-hide-all .button .outline style="width:*; height:34px; font-size:1em">&#38544;&#36523;&#27169;&#24335;</button></div> : ""}\n                        <div style="padding: 10px 0 0 0"><button #rdgen-onlyid-ok .button .outline style="width:*; height:38px; font-size:1em">&#30693;&#36947;&#20102;</button></div>\n                    </div>\n                    <ConnectStatus @{this.connect_status} />\n                </div>\n                <div #overlay style="position: absolute;size:*;background:black;opacity:0.5;display:none" />\n            </div>;\n    }\n'
 
@@ -391,7 +391,7 @@ RG_ONLYID_READY = "    // rdgen: only id window size (auto height, min 160)\n   
 
 
 def patch_only_id() -> None:
-    """olnyid=Y：界面只留 ID（可选中复制）、各可选按钮和「知道了」，点了收进托盘。"""
+    """onlyid=Y：界面只留 ID（可选中复制）、各可选按钮和「知道了」，点了收进托盘。"""
     ensure_hidden_module()
 
     p = "src/ui.rs"

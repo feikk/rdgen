@@ -383,9 +383,10 @@ def patch_brand() -> None:
     print("[ok] src/ui/index.tis: 已移除 powered-by%s" % ("，并在原位居中显示 Logo" if logo else ""))
 
 
-RG_ONLYID_HELPERS = 'function rdgen_only_id_on() { return handler.get_builtin_option("onlyid") == "Y" || handler.get_builtin_option("onlyidpwd") == "Y"; }\nfunction rdgen_only_id_pwd_on() { return handler.get_builtin_option("onlyidpwd") == "Y"; }\n\n'
+RG_ONLYID_HELPERS = ('function rdgen_only_id_on() { return handler.get_builtin_option("onlyid") == "Y"; }\nfunction rdgen_only_id_pwd_on() { return handler.get_builtin_option("onlyid") == "Y"; }\n')
 
-RG_ONLYID_READY = '    // rdgen: only id compact layout\n    if (rdgen_only_id_on()) {\n        self.timer(120ms, function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var pb = $(#powered-by); if (pb) pb.style#display = "none";\n                var br = $(#rdgen-brand); if (br) br.style#display = \"none\";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var h = 0;\n                if (content && content.children) {\n                    for (var j = 0; j < content.children.length; ++j) {\n                        var cc = content.children[j];\n                        if (cc && cc.style#display != "none") h += cc.box(#height, #border);\n                    }\n                }\n                if (h < scaleIt(120)) h = scaleIt(120);\n                var total = h + scaleIt(112);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], scaleIt(300), total);\n                } else {\n                    centerize(scaleIt(300), total);\n                }\n            } catch (e) { }\n        });\n    }\n'
+
+RG_ONLYID_READY = '    // rdgen: only id compact layout\n    if (rdgen_only_id_on()) {\n        var rdgen_fit = function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var h = 0;\n                if (content && content.children) {\n                    for (var j = 0; j < content.children.length; ++j) {\n                        var cc = content.children[j];\n                        if (cc && cc.style#display != "none") h += cc.box(#height, #border);\n                    }\n                }\n                if (h < scaleIt(150)) h = scaleIt(150);\n                var total = h + scaleIt(96);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], scaleIt(300), total);\n                } else {\n                    centerize(scaleIt(300), total);\n                }\n            } catch (e) { }\n        };\n        self.timer(150ms, rdgen_fit);\n        self.timer(700ms, rdgen_fit);\n    }\n'
 
 
 def patch_only_id() -> None:
@@ -497,21 +498,6 @@ def patch_only_id() -> None:
     if up in s and "pwd_eye.update()" not in s:
         s = s.replace(up, up
                       + "        if (update && app && app.pwd_eye) app.pwd_eye.update();\n", 1)
-
-    pa_i = s.find("class PasswordArea: Reactor.Component")
-    if pa_i < 0:
-        print("[warn] src/ui/index.tis: 没找到 PasswordArea 类")
-    elif "rdgen_only_id_pwd_on()) return" in s[pa_i:pa_i + 1200]:
-        print("[skip] src/ui/index.tis: 密码块裁剪已存在")
-    else:
-        pa_anchor = "        self.timer(1ms, function() { me.toggleMenuState() });\n"
-        seg = s[pa_i:pa_i + 1200]
-        if pa_anchor in seg:
-            pos = pa_i + seg.index(pa_anchor) + len(pa_anchor)
-            s = s[:pos] + '        if (rdgen_only_id_on() && !rdgen_only_id_pwd_on()) return <span style="display:none" />;\n' + s[pos:]
-            print("[ok] src/ui/index.tis: only-id 模式下隐藏官方密码块")
-        else:
-            print("[warn] src/ui/index.tis: PasswordArea 内部锚点没找到")
 
     # 启动时：隐藏多余控件、按内容高度收缩窗口
     ready_anchor = "    if (!handler.get_remote_id()) {\n"

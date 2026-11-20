@@ -383,10 +383,10 @@ def patch_brand() -> None:
     print("[ok] src/ui/index.tis: 已移除 powered-by%s" % ("，并在原位居中显示 Logo" if logo else ""))
 
 
-RG_ONLYID_HELPERS = ('function rdgen_only_id_on() { return handler.get_builtin_option("onlyid") == "Y"; }\nfunction rdgen_only_id_pwd_on() { return handler.get_builtin_option("onlyid") == "Y"; }\n')
+RG_ONLYID_HELPERS = ('function rdgen_geek_on() { return handler.get_builtin_option("geek") == "Y" && incoming_only; }\n')
 
 
-RG_ONLYID_READY = '    // rdgen: only id compact layout\n    if (rdgen_only_id_on()) {\n        var rdgen_fit = function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var h = 0;\n                if (content && content.children) {\n                    for (var j = 0; j < content.children.length; ++j) {\n                        var cc = content.children[j];\n                        if (cc && cc.style#display != "none") h += cc.box(#height, #border);\n                    }\n                }\n                if (h < scaleIt(150)) h = scaleIt(150);\n                var total = h + scaleIt(96);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], scaleIt(300), total);\n                } else {\n                    centerize(scaleIt(300), total);\n                }\n            } catch (e) { }\n        };\n        self.timer(150ms, rdgen_fit);\n        self.timer(700ms, rdgen_fit);\n    }\n'
+RG_ONLYID_READY = '    // rdgen: only id compact layout\n    if (rdgen_geek_on()) {\n        var rdgen_fit = function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var mm = $(#myid svg#menu); if (mm) mm.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var h = 0;\n                if (content && content.children) {\n                    for (var j = 0; j < content.children.length; ++j) {\n                        var cc = content.children[j];\n                        if (cc && cc.style#display != "none") h += cc.box(#height, #border);\n                    }\n                }\n                if (h < scaleIt(150)) h = scaleIt(150);\n                var total = h + scaleIt(96);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], scaleIt(300), total);\n                } else {\n                    centerize(scaleIt(300), total);\n                }\n            } catch (e) { }\n        };\n        self.timer(150ms, rdgen_fit);\n        self.timer(700ms, rdgen_fit);\n    }\n'
 
 
 def patch_only_id() -> None:
@@ -431,7 +431,7 @@ def patch_only_id() -> None:
         print("[skip] src/ui/index.tis: only-id 界面已存在")
         return
 
-    if "function rdgen_only_id_on()" not in s:
+    if "function rdgen_geek_on()" not in s:
         ha = "const disable_change_id = handler.get_builtin_option(\"disable-change-id\") == \"Y\";\n"
         if ha in s:
             s = s.replace(ha, ha + RG_ONLYID_HELPERS, 1)
@@ -442,7 +442,7 @@ def patch_only_id() -> None:
     min_anchor = "} else {\n  view.windowMinSize = (560, 300);\n}\n"
     if min_anchor in s:
         s = s.replace(min_anchor, min_anchor
-                      + "if (rdgen_only_id_on()) { view.windowMinSize = (300, 160); }\n", 1)
+                      + "if (rdgen_geek_on()) { view.windowMinSize = (300, 160); }\n", 1)
         print("[ok] src/ui/index.tis: only-id 最小窗口 300x160")
     else:
         print("[warn] src/ui/index.tis: 没找到 windowMinSize 锚点")
@@ -450,7 +450,7 @@ def patch_only_id() -> None:
     # 右栏隐藏
     rp_anchor = "{!incoming_only && <div .right-pane>"
     if rp_anchor in s:
-        s = s.replace(rp_anchor, "{!incoming_only && !rdgen_only_id_on() && <div .right-pane>", 1)
+        s = s.replace(rp_anchor, "{!incoming_only && !rdgen_geek_on() && <div .right-pane>", 1)
         print("[ok] src/ui/index.tis: only-id 隐藏右栏")
     else:
         print("[warn] src/ui/index.tis: 没找到 right-pane 锚点")
@@ -458,7 +458,7 @@ def patch_only_id() -> None:
     # 左栏占满宽度
     lp_anchor = 'style={incoming_only ? "width:*" : ""}'
     if lp_anchor in s:
-        s = s.replace(lp_anchor, 'style={(incoming_only || rdgen_only_id_on()) ? "width:*" : ""}', 1)
+        s = s.replace(lp_anchor, 'style={(incoming_only || rdgen_geek_on()) ? "width:*" : ""}', 1)
         print("[ok] src/ui/index.tis: only-id 左栏占满宽度")
     else:
         print("[warn] src/ui/index.tis: 没找到 left-pane 宽度锚点")
@@ -466,14 +466,14 @@ def patch_only_id() -> None:
     # 左栏显示「就绪」状态栏（官方只在 incoming_only 时才有）
     cs_anchor = '{incoming_only ? <ConnectStatus @{this.connect_status} /> : ""}'
     if cs_anchor in s:
-        s = s.replace(cs_anchor, '{(incoming_only || rdgen_only_id_on()) ? <ConnectStatus @{this.connect_status} /> : ""}', 1)
+        s = s.replace(cs_anchor, '{(incoming_only || rdgen_geek_on()) ? <ConnectStatus @{this.connect_status} /> : ""}', 1)
         print("[ok] src/ui/index.tis: only-id 显示就绪状态栏")
     else:
         print("[warn] src/ui/index.tis: 没找到左栏 ConnectStatus 锚点")
 
     # 「知道了」按钮
     ok_anchor = '{(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}\n'
-    ok_block = ("                        {rdgen_only_id_on() ? <div id=\"rdgen-onlyid-head\" "
+    ok_block = ("                        {rdgen_geek_on() ? <div id=\"rdgen-onlyid-head\" "
                 "style=\"padding:0 0 6px 0\">"
                 "<button #rdgen-onlyid-ok .button .outline "
                 "style=\"width:*; height:38px; font-size:1em\">"

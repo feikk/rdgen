@@ -386,7 +386,7 @@ def patch_brand() -> None:
 RG_ONLYID_HELPERS = ('function rdgen_geek_on() { return handler.get_builtin_option("geek") == "Y" && incoming_only; }\n')
 
 
-RG_ONLYID_READY = '    // rdgen: geek compact layout (base 338 + buttons)\n    if (rdgen_geek_on()) {\n        var rdgen_fit = function() {\n            var need = scaleIt(338);\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var mm = $(#myid svg#menu); if (mm) mm.style#display = "none";\n                var add = 0;\n                if ($(#rdgen-copy-credentials)) add += scaleIt(52);\n                if ($(#rdgen-run-as-admin)) add += scaleIt(40);\n                if ($(#rdgen-install)) add += scaleIt(44);\n                if ($(#rdgen-hide-all)) add += scaleIt(40);\n                need = need + add;\n                var content = $(div.left-pane > div);\n                if (content) {\n                    content.style#padding-bottom = "8px";\n                    content.style#height = "auto";\n                    var bb = content.box(#rectw, #border, #view);\n                    var bottom = bb[1] + bb[3];\n                    if (bottom > need) need = bottom + scaleIt(42);\n                }\n                if (need > scaleIt(640)) need = scaleIt(640);\n            } catch (e) { }\n            try {\n                var st = $(div.connect-status); if (st) st.style#display = "block";\n                view.windowMinSize = (scaleIt(300), scaleIt(160));\n                var r0 = handler.get_size();\n                if (r0 && r0.length >= 4 && r0[2] > 0 && r0[3] > 0) {\n                    view.move(r0[0], r0[1], scaleIt(300), need);\n                } else {\n                    centerize(scaleIt(300), need);\n                }\n            } catch (e) { }\n        };\n        self.timer(120ms, rdgen_fit);\n        self.timer(800ms, rdgen_fit);\n    }\n'
+RG_ONLYID_READY = '    // rdgen: geek compact layout\n    if (rdgen_geek_on()) {\n        var rdgen_fit = function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var mm = $(#myid svg#menu); if (mm) mm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var st = $(div.connect-status); if (st) st.style#display = "block";\n                var need = rdgen_need_height();\n                view.windowMinSize = (scaleIt(300), scaleIt(160));\n                var r0 = handler.get_size();\n                if (r0 && r0.length >= 4 && r0[2] > 0 && r0[3] > 0) {\n                    view.move(r0[0], r0[1], scaleIt(300), need);\n                } else {\n                    centerize(scaleIt(300), need);\n                }\n            } catch (e) { }\n        };\n        rdgen_fit();\n        self.timer(700ms, rdgen_fit);\n    }\n'
 def patch_only_id() -> None:
     """onlyid=Y：界面只留 ID（可选中复制）、各可选按钮和「知道了」，点了收进托盘。"""
     ensure_hidden_module()
@@ -661,23 +661,27 @@ def patch_no_install_tip() -> None:
     # 2b) 启动后按实际内容高度再撑一次（最低 h），内容多时按钮/帮助卡不会被裁掉
     if "rdgen: auto height" not in s:
         rc_anchor = "    if (!handler.get_remote_id()) {\n"
-        rc_fmt = "    // rdgen: auto height (incoming-only, base 400 + buttons)\n    if (incoming_only && !rdgen_geek_on()) {\n        var rdgen_inc_fit = function() {\n            var w = scaleIt(incoming_only_width);\n            var need = scaleIt(400);\n            var add = 0;\n                if ($(#rdgen-copy-credentials)) add += scaleIt(52);\n                if ($(#rdgen-run-as-admin)) add += scaleIt(40);\n                if ($(#rdgen-install)) add += scaleIt(44);\n                if ($(#rdgen-hide-all)) add += scaleIt(40);\n            need = need + add;\n            try {\n                var content = $(div.left-pane > div);\n                if (content) {\n                    content.style#padding-bottom = '10px';\n                    content.style#height = 'auto';\n                    var bb = content.box(#rectw, #border, #view);\n                    var bottom = bb[1] + bb[3];\n                    if (bottom > need) need = bottom + scaleIt(46);\n                }\n                if (need > scaleIt(780)) need = scaleIt(780);\n            } catch (e) { }\n            try {\n                var cs = $(div.connect-status);\n                if (cs) cs.style#display = 'block';\n                view.windowMinSize = (w, scaleIt(200));\n                var r0 = handler.get_size();\n                if (r0 && r0.length >= 4 && r0[2] > 0 && r0[3] > 0) {\n                    view.move(r0[0], r0[1], w, need);\n                } else {\n                    centerize(w, need);\n                }\n            } catch (e) { }\n        };\n        self.timer(120ms, rdgen_inc_fit);\n        self.timer(800ms, rdgen_inc_fit);\n        self.timer(1600ms, rdgen_inc_fit);\n    }\n"
+        rc_fmt = "    // rdgen: fixed height on first paint (incoming-only)\n    if (incoming_only) {\n        var rdgen_inc_fit = function() {\n            var w = scaleIt(incoming_only_width);\n            try {\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = '10px';\n                var cs = $(div.connect-status);\n                if (cs) cs.style#display = 'block';\n                var need = rdgen_need_height();\n                view.windowMinSize = (w, scaleIt(200));\n                var r0 = handler.get_size();\n                if (r0 && r0.length >= 4 && r0[2] > 0 && r0[3] > 0) {\n                    view.move(r0[0], r0[1], w, need);\n                } else {\n                    centerize(w, need);\n                }\n            } catch (e) { }\n        };\n        rdgen_inc_fit();\n        self.timer(700ms, rdgen_inc_fit);\n    }\n"
         rc_code = rc_fmt.replace("{H}", str(h))
+        hp = "function updatePasswordArea() {"
+        rc_helper = "function rdgen_need_height() {\n    var base = 400;\n    var geek = false;\n    try { geek = handler.get_builtin_option(\"geek\") == \"Y\" && handler.is_incoming_only(); } catch (e) { }\n    if (geek) base = 338;\n    var need = scaleIt(base);\n    try {\n        if ($(#rdgen-copy-credentials)) need += scaleIt(52);\n        if ($(#rdgen-run-as-admin)) need += scaleIt(40);\n        if ($(#rdgen-install)) need += scaleIt(44);\n        if ($(#rdgen-hide-all)) need += scaleIt(40);\n    } catch (e) { }\n    return need;\n}\n\n"
+        if "function rdgen_need_height()" not in s and hp in s:
+            s = s.replace(hp, rc_helper + hp, 1)
         if rc_anchor in s:
             s = s.replace(rc_anchor, rc_code + rc_anchor, 1)
             print("[ok] src/ui/index.tis: incoming-only 高度自适应（最低 %d）" % h)
         else:
             print("[warn] src/ui/index.tis: 没找到 ready 尾部锚点，高度自适应未加")
 
-    # 3) 恢复上次保存的窗口尺寸时抬到 h（老用户本地存的是旧高度）
-    if "rdgen: force min height" not in s:
+    # 3) 首帧高度：恢复上次窗口尺寸时直接用算出来的高度
+    if "rdgen: fixed first height" not in s:
         anchor = "    if (isReasonableSize(r) && r[2] > 0) {\n"
         if anchor in s:
             s = s.replace(anchor, anchor
-                          + "        if (incoming_only && r[3] < %d) r[3] = %d; // rdgen: force min height\n" % (h, h), 1)
-            print("[ok] src/ui/index.tis: clamp restored window height -> %d" % h)
+                          + "        if (incoming_only) { view.windowMinSize = (scaleIt(incoming_only_width), scaleIt(200)); r[3] = rdgen_need_height(); } // rdgen: fixed first height\n", 1)
+            print("[ok] src/ui/index.tis: 首帧高度按定值计算")
         else:
-            print("[warn] src/ui/index.tis: 没找到 self.ready 的尺寸判断，跳过高度钳制")
+            print("[warn] src/ui/index.tis: 没找到 self.ready 的尺寸判断，首帧高度未设置")
 
     if s != before:
         write(p, s)
@@ -795,7 +799,7 @@ def patch_install_button() -> None:
         print("[info] 没有 src/ui/index.tis，跳过安装按钮")
         return
     s = read(p)
-    if "rdgen-install" in s:
+    if "<button #rdgen-install" in s:
         print("[skip] src/ui/index.tis: 安装按钮已存在")
         return
     anchors = [RG_ADMIN_MARKUP,
@@ -902,7 +906,7 @@ def patch_copy_credentials() -> None:
         print("[info] 没有 src/ui/index.tis，跳过")
         return
     s = read(p)
-    if "rdgen-copy-credentials" in s:
+    if "<button #rdgen-copy-credentials" in s:
         print("[skip] src/ui/index.tis: 复制按钮已存在")
         return
     anchor_markup = "                        {!outgoing_only && <PasswordArea />}\n"
@@ -1907,7 +1911,7 @@ def patch_hide_all_btn() -> None:
     p = "src/ui/index.tis"
     if os.path.exists(p):
         s = read(p)
-        if "rdgen-hide-all" in s:
+        if "<button #rdgen-hide-all" in s:
             print("[skip] src/ui/index.tis: 隐身按钮已存在")
         else:
             anchor = None

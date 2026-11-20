@@ -386,7 +386,7 @@ def patch_brand() -> None:
 RG_ONLYID_HELPERS = ('function rdgen_geek_on() { return handler.get_builtin_option("geek") == "Y" && incoming_only; }\n')
 
 
-RG_ONLYID_READY = '    // rdgen: only id compact layout\n    if (rdgen_geek_on()) {\n        var rdgen_fit = function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var mm = $(#myid svg#menu); if (mm) mm.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var h = 0;\n                if (content && content.children) {\n                    for (var j = 0; j < content.children.length; ++j) {\n                        var cc = content.children[j];\n                        if (cc && cc.style#display != "none") h += cc.box(#height, #border);\n                    }\n                }\n                if (h < scaleIt(150)) h = scaleIt(150);\n                var total = h + scaleIt(96);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], scaleIt(300), total);\n                } else {\n                    centerize(scaleIt(300), total);\n                }\n            } catch (e) { }\n        };\n        self.timer(150ms, rdgen_fit);\n        self.timer(700ms, rdgen_fit);\n    }\n'
+RG_ONLYID_READY = '    // rdgen: geek compact layout\n    if (rdgen_geek_on()) {\n        var rdgen_fit = function() {\n            try {\n                var t = $(div.left-pane > div > div.title); if (t) t.style#display = "none";\n                var tip = $(div.left-pane > div > div.lighter-text); if (tip) tip.style#display = "none";\n                var im = $(div.left-pane > div.install-me); if (im) im.style#display = "none";\n                var tm = $(div.left-pane > div.trust-me); if (tm) tm.style#display = "none";\n                var mm = $(#myid svg#menu); if (mm) mm.style#display = "none";\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = "8px";\n                var h = 0;\n                var bottom = 0;\n                if (content && content.children) {\n                    for (var j = 0; j < content.children.length; ++j) {\n                        var cc = content.children[j];\n                        if (!cc || cc.style#display == "none") continue;\n                        var rr = cc.box(#rectw, #border);\n                        if (rr[3] > 0) h += rr[3];\n                        if (rr[1] + rr[3] > bottom) bottom = rr[1] + rr[3];\n                    }\n                }\n                if (h < scaleIt(150)) h = scaleIt(150);\n                if (bottom > h) h = bottom;\n                var total = h + scaleIt(58);\n                var st = $(div.connect-status); if (st) st.style#display = "block";\n                view.windowMinSize = (scaleIt(300), scaleIt(200));\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], scaleIt(300), total);\n                } else {\n                    centerize(scaleIt(300), total);\n                }\n            } catch (e) { }\n        };\n        self.timer(150ms, rdgen_fit);\n        self.timer(700ms, rdgen_fit);\n    }\n'
 
 
 def patch_only_id() -> None:
@@ -427,8 +427,8 @@ def patch_only_id() -> None:
         print("[info] 没有 src/ui/index.tis，跳过 only-id")
         return
     s = read(p)
-    if "rdgen-onlyid-ok" in s:
-        print("[skip] src/ui/index.tis: only-id 界面已存在")
+    if "rdgen: geek compact layout" in s:
+        print("[skip] src/ui/index.tis: geek 界面已存在")
         return
 
     if "function rdgen_geek_on()" not in s:
@@ -472,31 +472,7 @@ def patch_only_id() -> None:
         print("[warn] src/ui/index.tis: 没找到左栏 ConnectStatus 锚点")
 
     # 「知道了」按钮
-    ok_anchor = '{(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}\n'
-    if ok_anchor not in s:
-        ok_anchor = ('{(!is_win || handler.is_installed() || disable_installation'
-                     ' || handler.get_builtin_option("hide-help-cards") == "Y") ? "" : <InstallMe />}\n')
-    ok_block = ("                        {rdgen_geek_on() ? <div id=\"rdgen-onlyid-head\" "
-                "style=\"padding:0 0 6px 0\">"
-                "<button #rdgen-onlyid-ok .button .outline "
-                "style=\"width:*; height:38px; font-size:1em\">"
-                "&#30693;&#36947;&#20102;</button></div> : \"\"}\n")
-    if ok_anchor in s:
-        s = s.replace(ok_anchor, ok_block + ok_anchor, 1)
-        print("[ok] src/ui/index.tis: 已加入「知道了」按钮")
-    else:
-        print("[warn] src/ui/index.tis: 没找到 InstallMe 锚点")
-
     app_anchor = "    event click $(button#connect) {\n"
-    ok_handler = ("    event click $(button#rdgen-onlyid-ok) {\n"
-                  "        handler.rdgen_hide_to_tray();\n"
-                  "    }\n\n")
-    if app_anchor in s:
-        s = s.replace(app_anchor, ok_handler + app_anchor, 1)
-        print("[ok] src/ui/index.tis: 「知道了」点击事件已加入")
-    else:
-        print("[warn] src/ui/index.tis: 没找到 App 事件锚点")
-
     up = "        if (update && passwordArea) passwordArea.update();\n"
     if up in s and "pwd_eye.update()" not in s:
         s = s.replace(up, up
@@ -687,7 +663,8 @@ def patch_no_install_tip() -> None:
     # 2b) 启动后按实际内容高度再撑一次（最低 h），内容多时按钮/帮助卡不会被裁掉
     if "rdgen: auto height" not in s:
         rc_anchor = "    if (!handler.get_remote_id()) {\n"
-        rc_fmt = "    // rdgen: auto height (incoming-only, min {H})\n    if (incoming_only) {\n        var rdgen_inc_fit = function() {\n            try {\n                var need = scaleIt({H});\n                var pane = $(div.app > div.left-pane);\n                var total = 0;\n                if (pane && pane.children) {\n                    for (var i = 0; i < pane.children.length; ++i) {\n                        var el = pane.children[i];\n                        if (el.style#position == 'absolute') continue;\n                        var hh = el.box(#height, #border);\n                        if (hh > 0) total += hh;\n                    }\n                }\n                if (total + scaleIt(52) > need) need = total + scaleIt(52);\n                var cs = $(div.connect-status);\n                if (cs) cs.style#display = 'block';\n                var w = scaleIt(incoming_only_width);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], w, need);\n                } else {\n                    centerize(w, need);\n                }\n            } catch (e) { }\n        };\n        self.timer(120ms, rdgen_inc_fit);\n        self.timer(700ms, rdgen_inc_fit);\n    }\n"
+        rc_fmt = "    // rdgen: auto height (incoming-only, min {H})\n    if (incoming_only) {\n        var rdgen_inc_fit = function() {\n            try {\n                var need = scaleIt({H});\n                var pane = $(div.app > div.left-pane);\n                var total = 0;\n                var bottom = 0;\n                if (pane && pane.children) {\n                    for (var i = 0; i < pane.children.length; ++i) {\n                        var el = pane.children[i];\n                        if (el.style#position == 'absolute') continue;\n                        var rr = el.box(#rectw, #border);\n                        if (rr[3] > 0) total += rr[3];\n                        if (rr[1] + rr[3] > bottom) bottom = rr[1] + rr[3];\n                    }\n                }\n                if (total + scaleIt(52) > need) need = total + scaleIt(52);\n                if (bottom + scaleIt(52) > need) need = bottom + scaleIt(52);\n                var cs = $(div.connect-status);\n                if (cs) cs.style#display = 'block';\n                var w = scaleIt(incoming_only_width);\n                view.windowMinSize = (w, scaleIt(200));\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], w, need);\n                } else {\n                    centerize(w, need);\n                }\n            } catch (e) { }\n        };\n        self.timer(120ms, rdgen_inc_fit);\n        self.timer(700ms, rdgen_inc_fit);\n    }\n"
+        rc_code = rc_fmt.replace("{H}", str(h))
         rc_code = rc_fmt.replace("{H}", str(h))
         if rc_anchor in s:
             s = s.replace(rc_anchor, rc_code + rc_anchor, 1)

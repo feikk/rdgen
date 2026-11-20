@@ -473,6 +473,9 @@ def patch_only_id() -> None:
 
     # 「知道了」按钮
     ok_anchor = '{(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}\n'
+    if ok_anchor not in s:
+        ok_anchor = ('{(!is_win || handler.is_installed() || disable_installation'
+                     ' || handler.get_builtin_option("hide-help-cards") == "Y") ? "" : <InstallMe />}\n')
     ok_block = ("                        {rdgen_geek_on() ? <div id=\"rdgen-onlyid-head\" "
                 "style=\"padding:0 0 6px 0\">"
                 "<button #rdgen-onlyid-ok .button .outline "
@@ -684,28 +687,8 @@ def patch_no_install_tip() -> None:
     # 2b) 启动后按实际内容高度再撑一次（最低 h），内容多时按钮/帮助卡不会被裁掉
     if "rdgen: auto height" not in s:
         rc_anchor = "    if (!handler.get_remote_id()) {\n"
-        rc_code = ("    // rdgen: auto height (incoming-only, min %d)\n" % h
-                   + "    if (incoming_only) {\n"
-                   + "        self.timer(80ms, function() {\n"
-                   + "            try {\n"
-                   + "                var need = scaleIt(%d);\n" % h
-                   + "                var pane = $(div.app > div.left-pane);\n"
-                   + "                if (pane && pane.children) {\n"
-                   + "                    var total = 0;\n"
-                   + "                    var kids = pane.children;\n"
-                   + "                    for (var i = 0; i < kids.length; ++i) {\n"
-                   + "                        var el = kids[i];\n"
-                   + "                        if (el.style#position == 'absolute') continue;\n"
-                   + "                        var hh = el.box(#height, #border);\n"
-                   + "                        if (hh > 0) total += hh;\n"
-                   + "                    }\n"
-                   + "                    if (total + scaleIt(8) > need) need = total + scaleIt(8);\n"
-                   + "                }\n"
-                   + "                var (dx, dy, dw, dh) = view.box(#rectw, #border);\n"
-                   + "                if (need > dh) view.move(dx, dy - (need - dh) / 2, dw, need);\n"
-                   + "            } catch (e) { }\n"
-                   + "        });\n"
-                   + "    }\n")
+        rc_fmt = "    // rdgen: auto height (incoming-only, min {H})\n    if (incoming_only) {\n        var rdgen_inc_fit = function() {\n            try {\n                var need = scaleIt({H});\n                var pane = $(div.app > div.left-pane);\n                var total = 0;\n                if (pane && pane.children) {\n                    for (var i = 0; i < pane.children.length; ++i) {\n                        var el = pane.children[i];\n                        if (el.style#position == 'absolute') continue;\n                        var hh = el.box(#height, #border);\n                        if (hh > 0) total += hh;\n                    }\n                }\n                if (total + scaleIt(52) > need) need = total + scaleIt(52);\n                var cs = $(div.connect-status);\n                if (cs) cs.style#display = 'block';\n                var w = scaleIt(incoming_only_width);\n                var r = handler.get_size();\n                if (r && r.length >= 4 && r[2] > 0 && r[3] > 0) {\n                    view.move(r[0], r[1], w, need);\n                } else {\n                    centerize(w, need);\n                }\n            } catch (e) { }\n        };\n        self.timer(120ms, rdgen_inc_fit);\n        self.timer(700ms, rdgen_inc_fit);\n    }\n"
+        rc_code = rc_fmt.replace("{H}", str(h))
         if rc_anchor in s:
             s = s.replace(rc_anchor, rc_code + rc_anchor, 1)
             print("[ok] src/ui/index.tis: incoming-only 高度自适应（最低 %d）" % h)

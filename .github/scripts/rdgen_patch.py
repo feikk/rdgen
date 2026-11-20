@@ -664,7 +664,7 @@ def patch_no_install_tip() -> None:
         rc_fmt = "    // rdgen: fixed height on first paint (incoming-only)\n    if (incoming_only) {\n        var rdgen_inc_fit = function() {\n            var w = scaleIt(incoming_only_width);\n            try {\n                var content = $(div.left-pane > div);\n                if (content) content.style#padding-bottom = '10px';\n                var cs = $(div.connect-status);\n                if (cs) cs.style#display = 'block';\n                var need = rdgen_need_height();\n                view.windowMinSize = (w, scaleIt(200));\n                var r0 = handler.get_size();\n                if (r0 && r0.length >= 4 && r0[2] > 0 && r0[3] > 0) {\n                    view.move(r0[0], r0[1], w, need);\n                } else {\n                    centerize(w, need);\n                }\n            } catch (e) { }\n        };\n        rdgen_inc_fit();\n        self.timer(700ms, rdgen_inc_fit);\n    }\n"
         rc_code = rc_fmt.replace("{H}", str(h))
         hp = "function updatePasswordArea() {"
-        rc_helper = "function rdgen_need_height() {\n    var base = 420;\n    var geek = false;\n    try { geek = handler.get_builtin_option(\"geek\") == \"Y\" && handler.is_incoming_only(); } catch (e) { }\n    if (geek) base = 350;\n    var need = scaleIt(base);\n    try {\n        if ($(#rdgen-copy-credentials)) need += scaleIt(62);\n        if ($(#rdgen-run-as-admin)) need += scaleIt(50);\n        if ($(#rdgen-install)) need += scaleIt(54);\n        if ($(#rdgen-hide-all)) need += scaleIt(50);\n    } catch (e) { }\n    return need;\n}\n\n"
+        rc_helper = "function rdgen_need_height() {\n    var base = 420;\n    var geek = false;\n    try { geek = handler.get_builtin_option(\"geek\") == \"Y\" && handler.is_incoming_only(); } catch (e) { }\n    if (geek) base = 350;\n    var need = scaleIt(base);\n    try {\n        if ($(#rdgen-copy-credentials)) need += scaleIt(62);\n        if ($(#rdgen-run-as-admin)) need += scaleIt(50);\n        if ($(#rdgen-install)) need += scaleIt(50);\n        if ($(#rdgen-hide-all)) need += scaleIt(50);\n    } catch (e) { }\n    return need;\n}\n\n"
         if "function rdgen_need_height()" not in s and hp in s:
             s = s.replace(hp, rc_helper + hp, 1)
         if rc_anchor in s:
@@ -779,7 +779,7 @@ RG_COPY_HANDLER = ('event click $(button#rdgen-copy-credentials) {\n'
 
 RG_INSTALL_MARKUP = ('                        {!outgoing_only && is_win && !handler.is_installed() && !disable_installation'
                     ' && handler.get_builtin_option("installbtn") == "Y" ? <div style="padding: 0 0 6px 0">'
-                    '<button #rdgen-install .button .outline style="width:*; height:38px; font-size:1em">'
+                    '<button #rdgen-install .button .outline style="width:*; height:34px; font-size:1em">'
                     '&#23433;&#35013;&#21040;&#26412;&#26426;</button></div> : ""}\n')
 
 RG_INSTALL_HANDLER = ('event click $(button#rdgen-install) {\n'

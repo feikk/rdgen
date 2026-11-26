@@ -2135,60 +2135,118 @@ def patch_flutter_hide_all() -> None:
     print("[ok] server_model.dart: 隐身模式下 CM 窗口始终隐藏")
 
 
-RG_TWO_FINGER_OLD = ("    } else {\n"
-                     "      // mobile\n"
-                     "      ffi.canvasModel.updateScale(d.scale / _scale, d.focalPoint);\n"
-                     "      _scale = d.scale;\n"
-                     "      ffi.canvasModel.panX(d.focalPointDelta.dx);\n"
-                     "      ffi.canvasModel.panY(d.focalPointDelta.dy);\n"
-                     "    }\n")
+RG_TF_FIELDS_ANCHOR = "  double _mouseScrollIntegral = 0; // mouse scroll speed controller\n"
 
-RG_TWO_FINGER_NEW = ("    } else {\n"
-                     "      // rdgen: two finger scroll (mobile)\n"
-                     "      final rdgenScaleRatio = d.scale / _scale;\n"
-                     "      final rdgenZooming =\n"
-                     "          rdgenScaleRatio < 0.97 || rdgenScaleRatio > 1.03;\n"
-                     "      if (rdgenZooming) {\n"
-                     "        ffi.canvasModel.updateScale(rdgenScaleRatio, d.focalPoint);\n"
-                     "        _scale = d.scale;\n"
-                     "      } else {\n"
-                     "        _scale = 1;\n"
-                     "        if (d.focalPointDelta.dx.abs() > d.focalPointDelta.dy.abs()) {\n"
-                     "          ffi.canvasModel.panX(d.focalPointDelta.dx);\n"
-                     "        } else {\n"
-                     "          _mouseScrollIntegral += d.focalPointDelta.dy / 4;\n"
-                     "          while (_mouseScrollIntegral >= 1) {\n"
-                     "            inputModel.scroll(1);\n"
-                     "            _mouseScrollIntegral -= 1;\n"
-                     "          }\n"
-                     "          while (_mouseScrollIntegral <= -1) {\n"
-                     "            inputModel.scroll(-1);\n"
-                     "            _mouseScrollIntegral += 1;\n"
-                     "          }\n"
-                     "        }\n"
-                     "      }\n"
-                     "    }\n")
+RG_TF_FIELDS = ("  double _mouseScrollIntegral = 0; // mouse scroll speed controller\n"
+                "  // rdgen: touchfix 双指滚动状态\n"
+                "  double _rdgenScaleBase = 1;\n"
+                "  bool _rdgenTwoFingerZoom = false;\n")
+
+RG_TF_GETTER_ANCHOR = "class RawKeyFocusScope extends StatelessWidget {\n"
+
+RG_TF_GETTER = ("// rdgen: touchfix=Y 时手机版启用双指滚动手势（默认保持官方手势）\n"
+                "bool? _rdgenTouchFixCache;\n"
+                "bool get rdgenTouchFixOn {\n"
+                "  if (isDesktop || isWebDesktop) return false;\n"
+                "  _rdgenTouchFixCache ??=\n"
+                "      bind.mainGetBuildinOption(key: 'touchfix') == 'Y';\n"
+                "  return _rdgenTouchFixCache!;\n"
+                "}\n\n")
+
+RG_TF_START_OLD = ("  onTwoFingerScaleStart(ScaleStartDetails d) {\n"
+                   "    _lastTapDownDetails = null;\n"
+                   "    if (isNotTouchBasedDevice()) {\n"
+                   "      return;\n"
+                   "    }\n")
+
+RG_TF_START_NEW = (RG_TF_START_OLD
+                   + "    // rdgen: touchfix 双指手势起点\n"
+                   + "    if (rdgenTouchFixOn) {\n"
+                   + "      _rdgenScaleBase = d.scale;\n"
+                   + "      _rdgenTwoFingerZoom = false;\n"
+                   + "      _mouseScrollIntegral = 0;\n"
+                   + "    }\n")
+
+RG_TF_END_OLD = ("  onTwoFingerScaleEnd(ScaleEndDetails d) async {\n"
+                 "    if (isNotTouchBasedDevice()) {\n"
+                 "      return;\n"
+                 "    }\n")
+
+RG_TF_END_NEW = (RG_TF_END_OLD
+                 + "    // rdgen: touchfix 手势结束复位\n"
+                 + "    _rdgenTwoFingerZoom = false;\n"
+                 + "    _rdgenScaleBase = 1;\n")
+
+RG_TF_SCALE_OLD = ("    } else {\n"
+                   "      // mobile\n"
+                   "      ffi.canvasModel.updateScale(d.scale / _scale, d.focalPoint);\n"
+                   "      _scale = d.scale;\n"
+                   "      ffi.canvasModel.panX(d.focalPointDelta.dx);\n"
+                   "      ffi.canvasModel.panY(d.focalPointDelta.dy);\n"
+                   "    }\n")
+
+RG_TF_SCALE_NEW = ("    } else {\n"
+                   "      // mobile\n"
+                   "      if (rdgenTouchFixOn) {\n"
+                   "        // rdgen: 双指上下滑动 = 滚动屏幕；明显捏合才缩放\n"
+                   "        final rdgenRatio = d.scale / _rdgenScaleBase;\n"
+                   "        if (!_rdgenTwoFingerZoom &&\n"
+                   "            (rdgenRatio > 1.25 || rdgenRatio < 0.8)) {\n"
+                   "          _rdgenTwoFingerZoom = true;\n"
+                   "        }\n"
+                   "        if (_rdgenTwoFingerZoom) {\n"
+                   "          ffi.canvasModel.updateScale(d.scale / _scale, d.focalPoint);\n"
+                   "          _scale = d.scale;\n"
+                   "        } else {\n"
+                   "          _scale = 1;\n"
+                   "          _mouseScrollIntegral += d.focalPointDelta.dy / 4;\n"
+                   "          while (_mouseScrollIntegral >= 1) {\n"
+                   "            inputModel.scroll(1);\n"
+                   "            _mouseScrollIntegral -= 1;\n"
+                   "          }\n"
+                   "          while (_mouseScrollIntegral <= -1) {\n"
+                   "            inputModel.scroll(-1);\n"
+                   "            _mouseScrollIntegral += 1;\n"
+                   "          }\n"
+                   "        }\n"
+                   "      } else {\n"
+                   "        ffi.canvasModel.updateScale(d.scale / _scale, d.focalPoint);\n"
+                   "        _scale = d.scale;\n"
+                   "        ffi.canvasModel.panX(d.focalPointDelta.dx);\n"
+                   "        ffi.canvasModel.panY(d.focalPointDelta.dy);\n"
+                   "      }\n"
+                   "    }\n")
 
 
 def patch_two_finger_scroll() -> None:
-    """移动端（Android/iOS）双指上下滑动 = 滚动远端屏幕；捏合仍是缩放。
+    """touchfix=Y：手机版双指上下滑动 = 滚动远端屏幕，捏合仍是缩放。
 
-    原来只有三指竖滑才滚动，双指只能平移画布，手机上很难受。
+    不传这个参数时保持官方原版手势（双指只缩放 / 平移画布）。
     """
     p = "flutter/lib/common/widgets/remote_input.dart"
     if not os.path.exists(p):
         print("[info] 没有 remote_input.dart，跳过双指滚动")
         return
     s = read(p)
-    if "rdgen: two finger scroll" in s:
-        print("[skip] remote_input.dart: 双指滚动已存在")
+    if "rdgenTouchFixOn" in s:
+        print("[skip] remote_input.dart: touchfix 手势已存在")
         return
-    if RG_TWO_FINGER_OLD not in s:
-        print("[warn] remote_input.dart: 没找到两指缩放分支，双指滚动未加")
+    if RG_TF_SCALE_OLD not in s:
+        print("[warn] remote_input.dart: 没找到两指缩放分支，touchfix 手势未加")
         return
-    s = s.replace(RG_TWO_FINGER_OLD, RG_TWO_FINGER_NEW, 1)
+    if RG_TF_GETTER_ANCHOR not in s:
+        print("[warn] remote_input.dart: 没找到类锚点，touchfix 手势未加")
+        return
+    s = s.replace(RG_TF_GETTER_ANCHOR, RG_TF_GETTER + RG_TF_GETTER_ANCHOR, 1)
+    if RG_TF_FIELDS_ANCHOR in s:
+        s = s.replace(RG_TF_FIELDS_ANCHOR, RG_TF_FIELDS, 1)
+    s = s.replace(RG_TF_SCALE_OLD, RG_TF_SCALE_NEW, 1)
+    if RG_TF_START_OLD in s:
+        s = s.replace(RG_TF_START_OLD, RG_TF_START_NEW, 1)
+    if RG_TF_END_OLD in s:
+        s = s.replace(RG_TF_END_OLD, RG_TF_END_NEW, 1)
     write(p, s)
-    print("[ok] remote_input.dart: 双指上下滑动改为滚动屏幕")
+    print("[ok] remote_input.dart: touchfix=Y 双指滚动屏幕（默认官方手势）")
 
 
 def main() -> None:

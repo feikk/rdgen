@@ -1400,6 +1400,25 @@ jobs:
                 done
             fi
 
+            # rdgen: drm 打包前加固 staging 目录。上面那串“改名” sed 会重写 build.py 里
+            # 的 tmpdeb 路径，曾出现 mkdir 与 cp 指向不同目录、导致
+            # `cp ... tmpdeb/usr/lib/rustdesk/` 报“目录不存在”。这里不依赖那两行，
+            # 直接在 python 里 makedirs，保证 cp 之前目录一定存在（幂等）。
+            sed -n '/def stage_libdrmtap_into_deb/,+14p' build.py || true
+            python3 - <<'PATCHEOF'
+            p = 'build.py'
+            s = open(p).read()
+            anchor = '    assert_so_satisfies_the_runtime_abi_gate(so_path)\n'
+            ensure = "    os.makedirs('tmpdeb/usr/lib/rustdesk', exist_ok=True)\n"
+            if anchor not in s:
+                print('[warn] build.py: 没找到 drm staging 的 abi-gate 锚点，未加固')
+            elif ensure in s:
+                print('[skip] build.py: 已有 os.makedirs 加固')
+            else:
+                s = s.replace(anchor, anchor + ensure, 1)
+                open(p, 'w').write(s)
+                print('[ok] build.py: drm staging 前已 makedirs(tmpdeb/usr/lib/rustdesk)')
+            PATCHEOF
             python3 ./build.py --flutter --drm --hwcodec --unix-file-copy-paste --skip-cargo
             if [ "${{ env.appname }}" = "rustdesk" ]; then
               expected_dir="usr/share/rustdesk"

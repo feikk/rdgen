@@ -667,26 +667,34 @@ jobs:
         run: |
           mkdir -p ~/.gradle
           cat > ~/.gradle/init.gradle <<'EOF'
-          // rdgen: repo.maven.apache.org 常返回 429 Too Many Requests，导致
-          // :gradle:compileGroovy 解析 javawriter / asm 失败。这里把阿里云镜像
-          // 插到所有仓库列表前面，官方仓库仍然保留在后面兜底。
-          def rdgenMirrors = [
-              'https://maven.aliyun.com/repository/public',
-              'https://maven.aliyun.com/repository/google',
-              'https://maven.aliyun.com/repository/gradle-plugin'
-          ]
-          allprojects { p ->
-              p.buildscript.repositories {
-                  rdgenMirrors.each { m -> maven { url m } }
-              }
-              p.repositories {
-                  rdgenMirrors.each { m -> maven { url m } }
+          // rdgen: repo.maven.apache.org 会返回 429 Too Many Requests，让
+          // :gradle:compileGroovy 解析 javawriter / asm 失败。这里不改仓库列表、
+          // 不新增仓库（那会撞上 settings.gradle 的 PREFER/FAIL_ON_PROJECT_REPOS），
+          // 而是直接把“指向 Maven Central 的仓库”原地改写成阿里云镜像地址，
+          // 顺序、content filter 全部保持原样。
+          import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+          def rdgenRepointCentral = { repositories ->
+              repositories.all { repo ->
+                  try {
+                      if (repo instanceof MavenArtifactRepository) {
+                          def u = repo.url.toString()
+                          if (u.contains('repo.maven.apache.org') || u.contains('repo1.maven.org')) {
+                              repo.url = 'https://maven.aliyun.com/repository/public'
+                          }
+                      }
+                  } catch (Throwable ignored) { }
               }
           }
-          settingsEvaluated { settings ->
-              settings.pluginManagement.repositories {
-                  rdgenMirrors.each { m -> maven { url m } }
-              }
+
+          allprojects { p ->
+              rdgenRepointCentral(p.repositories)
+              rdgenRepointCentral(p.buildscript.repositories)
+          }
+
+          settingsEvaluated { s ->
+              try { rdgenRepointCentral(s.pluginManagement.repositories) } catch (Throwable ignored) { }
+              try { rdgenRepointCentral(s.dependencyResolutionManagement.repositories) } catch (Throwable ignored) { }
           }
           EOF
           cat ~/.gradle/init.gradle

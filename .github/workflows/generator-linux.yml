@@ -198,6 +198,17 @@ jobs:
         with:
           name: bridge-artifact
           path: ./
+      - name: rdgen flutter patch (bridge + ui)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # bridge 是打过 rdgen 补丁的 flutter_ffi.rs 生成的，构建目标必须也有同样的
+          # ffi 函数，否则 bridge_generated.rs 找不到符号（E0425）；顺带把
+          # copybtn / prebtn / installbtn 这几个按钮补丁打进 flutter UI（运行时按
+          # custom 配置里的同名 buildin option 决定是否显示）
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-ffi
+          python3 rdgen_patch.py flutter-copy-credentials
 
       # vcpkg 2026.07.29's SPDX scripts require CMake 4.3+, but this ARM64 runner selects CMake 3.31.
       - name: Install CMake for vcpkg on Linux ARM64
@@ -458,6 +469,17 @@ jobs:
         with:
           name: bridge-artifact
           path: ./
+      - name: rdgen flutter patch (bridge + ui)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # bridge 是打过 rdgen 补丁的 flutter_ffi.rs 生成的，构建目标必须也有同样的
+          # ffi 函数，否则 bridge_generated.rs 找不到符号（E0425）；顺带把
+          # copybtn / prebtn / installbtn 这几个按钮补丁打进 flutter UI（运行时按
+          # custom 配置里的同名 buildin option 决定是否显示）
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-ffi
+          python3 rdgen_patch.py flutter-copy-credentials
 
       - uses: rustdesk-org/run-on-arch-action@d3fcfbb632b84cf7f6bc772bfaaa2c2f4f8789a8
         name: Build rustdesk
@@ -926,6 +948,17 @@ jobs:
         with:
           name: bridge-artifact
           path: ./
+      - name: rdgen flutter patch (bridge + ui)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # bridge 是打过 rdgen 补丁的 flutter_ffi.rs 生成的，构建目标必须也有同样的
+          # ffi 函数，否则 bridge_generated.rs 找不到符号（E0425）；顺带把
+          # copybtn / prebtn / installbtn 这几个按钮补丁打进 flutter UI（运行时按
+          # custom 配置里的同名 buildin option 决定是否显示）
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-ffi
+          python3 rdgen_patch.py flutter-copy-credentials
 
       - name: Restore vcpkg installed cache
         uses: actions/cache@v4
@@ -1175,6 +1208,17 @@ jobs:
         with:
           name: bridge-artifact
           path: ./
+      - name: rdgen flutter patch (bridge + ui)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # bridge 是打过 rdgen 补丁的 flutter_ffi.rs 生成的，构建目标必须也有同样的
+          # ffi 函数，否则 bridge_generated.rs 找不到符号（E0425）；顺带把
+          # copybtn / prebtn / installbtn 这几个按钮补丁打进 flutter UI（运行时按
+          # custom 配置里的同名 buildin option 决定是否显示）
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-ffi
+          python3 rdgen_patch.py flutter-copy-credentials
 
       - uses: rustdesk-org/run-on-arch-action@d3fcfbb632b84cf7f6bc772bfaaa2c2f4f8789a8 # no release tag; commit 2026-05-26
         name: Build rustdesk

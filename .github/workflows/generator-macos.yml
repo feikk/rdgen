@@ -84,6 +84,7 @@ jobs:
       STATUS_URL: "${{ secrets.GENURL }}/updategh"
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
         
@@ -121,6 +122,7 @@ jobs:
             ref: refs/tags/${{ env.VERSION }}
             submodules: recursive
   
+
       - name: Checkout source code
         if: ${{ env.VERSION == 'master' }}
         uses: actions/checkout@v4
@@ -205,30 +207,12 @@ jobs:
         if: env.downloadLink != 'https://rustdesk.com/download'
         continue-on-error: true
         shell: bash
+        env:
+          LINK_HOME: ${{ env.urlLink }}
+          LINK_DOWNLOAD: ${{ env.downloadLink }}
         run: |
-          sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./flutter/lib/desktop/pages/desktop_home_page.dart
-          sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./flutter/lib/mobile/pages/connection_page.dart
-          sed -i -e 's|https://rustdesk.com/download|${{ env.downloadLink }}|' ./src/ui/index.tis
-          sed -i -e 's|&download_url|"${{ env.downloadLink }}"|' ./src/updater.rs
-          sed -i -e 's|$downloadUrl/$downloadFile|${{ env.downloadLink }}|' ./flutter/lib/desktop/widgets/update_progress.dart
-          
-          # Update slogan - About in en.rs 
-          sed -i '' -e 's/("Slogan_tip", "Made with heart in this chaotic world!")/("Slogan_tip", "Powered by ${{ env.appname }}")/' ./src/lang/en.rs
-          sed -i '' -e 's/("About RustDesk", "")/("About RustDesk", "About ${{ env.appname }}")/' ./src/lang/en.rs
-          
-
-          # Update slogan - About in nl.rs
-          sed -i '' -e 's/("Slogan_tip", "Ontwikkeld met het hart voor deze chaotische wereld!")/("Slogan_tip", "Powered by ${{ env.appname }}")/' ./src/lang/nl.rs
-          sed -i '' -e 's/("Your Desktop", "Uw Bureaublad")/("Your Desktop", "Uw ${{ env.appname }}")/' ./src/lang/nl.rs
-          sed -i '' -e 's/("About RustDesk", "Over RustDesk")/("About RustDesk", "Over ${{ env.appname }}")/' ./src/lang/nl.rs
-          sed -i '' -e 's/("About", "Over")/("About", "Over ${{ env.appname }}")/' ./src/lang/nl.rs
-            
-          # Update pubspec.yaml with proper YAML formatting
-          cp ./flutter/pubspec.yaml ./flutter/pubspec.yaml.bak
-          echo "  archive: ^3.6.1" > ./flutter/temp_dependency.txt
-          awk '/intl:/{print;system("cat ./flutter/temp_dependency.txt");next}1' ./flutter/pubspec.yaml > ./flutter/pubspec.yaml.tmp
-          mv ./flutter/pubspec.yaml.tmp ./flutter/pubspec.yaml
-          rm ./flutter/temp_dependency.txt 
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py links
 
       - name: set server, serverPort, key, and apiserver
         continue-on-error: true
@@ -289,12 +273,11 @@ jobs:
           command: |
             wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/allowCustom.py
             python allowCustom.py
-            wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/forcePresetPassword.py
-            python forcePresetPassword.py
             wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/removeSetupServerTip.diff
             git apply removeSetupServerTip.diff
             # sed -i '/intl:/a \ \ archive: ^3.6.1' ./flutter/pubspec.yaml
           
+
       - name: Install build runtime
         run: |
           brew install llvm create-dmg
@@ -328,6 +311,7 @@ jobs:
             cd $(dirname $(dirname $(which flutter)))
             [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
       
+
       - name: Workaround for flutter issue
         shell: bash
         run: |
@@ -336,6 +320,7 @@ jobs:
           sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g' ../packages/flutter/lib/src/scheduler/binding.dart
           grep -n '_setFramesEnabledState(false);' ../packages/flutter/lib/src/scheduler/binding.dart
         
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -481,6 +466,7 @@ jobs:
           flutter pub run flutter_launcher_icons
           cd ..
       
+
       - name: ui.rs
         if: ${{ env.iconlink_url != 'false' }}
         continue-on-error: true
@@ -504,12 +490,14 @@ jobs:
           sed -i -e 's#if is_local || peer_nat_type == NatType::SYMMETRIC {#if is_local || peer_nat_type == NatType::SYMMETRIC || !key.is_empty() {#' ./src/client.rs
           grep -n "key.is_empty()" ./src/client.rs || true
   
+
       - name: use X for offline display instead of orange circle
-        continue-on-error: true
         if: env.xOffline == 'true'
+        continue-on-error: true
+        shell: bash
         run: |
-          wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/xoffline.diff
-          git apply xoffline.diff
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py xoffline
 
       - name: hide-cm
         continue-on-error: true
@@ -521,15 +509,27 @@ jobs:
       - name: removeNewVersionNotif
         continue-on-error: true
         if: env.removeNewVersionNotif == 'true'
-        run: | 
-          sed -i -e 's|updateUrl.isNotEmpty|false|' ./flutter/lib/desktop/pages/desktop_home_page.dart
-          #sed -i '/let (request, url) =/,/Ok(())/{/Ok(())/!d}' ./src/common.rs
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py no-update-notif
 
       - name: Restore bridge files
         uses: actions/download-artifact@master
         with:
           name: bridge-artifact
           path: ./
+      - name: rdgen flutter patch (bridge + ui)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # bridge 是打过 rdgen 补丁的 flutter_ffi.rs 生成的，构建目标必须也有同样的
+          # ffi 函数，否则 bridge_generated.rs 找不到符号（E0425）；顺带把
+          # copybtn / prebtn / installbtn 这几个按钮补丁打进 flutter UI（运行时按
+          # custom 配置里的同名 buildin option 决定是否显示）
+          curl -fsSL --retry 5 --retry-delay 2 -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py || { echo "::warning::fetch rdgen_patch.py failed, skip"; exit 0; }
+          python3 rdgen_patch.py flutter-ffi
+          python3 rdgen_patch.py flutter-copy-credentials
 
       - name: Restore vcpkg installed cache
         uses: actions/cache@v4
@@ -593,12 +593,10 @@ jobs:
         run: |
           APP=$(find ./flutter/build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
           echo "App bundle: $APP"
-          # load_custom_client() on macOS looks in <Contents/MacOS>/../Resources,
-          # i.e. Contents/Resources/custom_.txt — not next to the executable.
-          mkdir -p "$APP/Contents/Resources"
-          echo -n '${{ env.custom }}' > "$APP/Contents/Resources/custom_.txt"
-          ls -l "$APP/Contents/Resources/custom_.txt"
+          echo -n '${{ env.custom }}' > "$APP/Contents/MacOS/custom_.txt"
+          ls -l "$APP/Contents/MacOS/custom_.txt"
       
+
       - name: Install rcodesign tool
         if: env.MACOS_P12_BASE64 != null
         shell: bash
@@ -619,6 +617,7 @@ jobs:
               brew install pkg-config
           fi
   
+
       - name: Show version information (Rust, cargo, Clang)
         shell: bash
         run: |
@@ -629,6 +628,7 @@ jobs:
           cargo -V
           rustc -V
       
+
       - name: icon svg handling
         if: ${{ env.iconlink_url != 'false' }}
         continue-on-error: false
@@ -772,6 +772,7 @@ jobs:
             "${{ env.appname }}.app"
           mv "${{ env.appname }}-${{ matrix.job.arch }}.dmg" $GITHUB_WORKSPACE/
   
+
       - name: Rename rustdesk
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
@@ -819,6 +820,7 @@ jobs:
     continue-on-error: true
     if: always()
     steps:
+
       - name: Delete secrets artifact
         uses: geekyeggo/delete-artifact@v5
         with:

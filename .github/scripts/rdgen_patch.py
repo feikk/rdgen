@@ -960,6 +960,7 @@ def patch_flutter_copy_button() -> None:
 RG_FLUTTER_ADMIN_METHOD = """
   Widget buildRdgenRunAsAdminButton() {
     if (bind.mainGetBuildinOption(key: 'prebtn') != 'Y') return SizedBox();
+    if (!isWindows) return SizedBox();
     if (bind.mainIsInstalled()) return SizedBox();
     if (bind.rdgenIsElevated()) return SizedBox();
     return Padding(

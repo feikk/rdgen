@@ -58,6 +58,9 @@ jobs:
   build-for-macos:
     name: ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
+    # rdgen: arm64 那格在这个账号下始终分不到 macos 执行机（队列 15 分钟后被取消），
+    # 标成容错，避免整条流水线因为拿不到机器而变红；x86_64 仍严格要求成功。
+    continue-on-error: ${{ matrix.job.optional || false }}
     needs: [generate-bridge, setup]
     strategy:
       fail-fast: false
@@ -70,15 +73,17 @@ jobs:
               extra-cargo-features: "",
               arch: x86_64,
               vcpkg-triplet: x64-osx,
+              optional: false,
             }
           - {
               target: aarch64-apple-darwin,
-              os: macos-26, #rdgen: macos-15 arm64 排队严重（两次 15 分钟未分到 runner 被取消），换 macos-26
+              os: macos-15, #rdgen: macos-26 / macos-14 实测同样分不到 arm64 机器，回退到更成熟的 macos-15
               # extra-build-args: "--disable-flutter-texture-render", # disable this for mac, because we see a lot of users reporting flickering both on arm and x64, and we can not confirm if texture rendering has better performance if htere is no vram, https://github.com/rustdesk/rustdesk/issues/6296
               extra-build-args: "--screencapturekit",
               extra-cargo-features: ",screencapturekit",
               arch: aarch64,
               vcpkg-triplet: arm64-osx,
+              optional: true, #rdgen: 见上方 continue-on-error 说明
             }
     env:
       STATUS_URL: "${{ secrets.GENURL }}/updategh"

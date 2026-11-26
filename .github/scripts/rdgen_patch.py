@@ -2249,6 +2249,81 @@ def patch_two_finger_scroll() -> None:
     print("[ok] remote_input.dart: touchfix=Y 双指滚动屏幕（默认官方手势）")
 
 
+RG_PB_START = "Widget loadPowered(BuildContext context) {"
+RG_PB_END_MARK = "  ).marginOnly(top: 6);\n}\n"
+
+RG_PB_NEW = '''Widget loadPowered(BuildContext context) {
+  if (bind.mainGetBuildinOption(key: "hide-powered-by-me") == 'Y') {
+    return SizedBox.shrink();
+  }
+  // rdgen powered-by: mobile shows company name and links to the download url
+  const String rdgenCompany = "__RDGEN_COMPANY__";
+  const String rdgenPbLink = "__RDGEN_PB_LINK__";
+  var rdgenPbText = translate("powered_by_me");
+  if (isMobile &&
+      rdgenCompany.isNotEmpty &&
+      rdgenCompany != "__RDGEN_COMPANY__") {
+    final rdgenApp = bind.mainGetAppNameSync();
+    if (rdgenApp.isNotEmpty) {
+      rdgenPbText = rdgenPbText.replaceAll(rdgenApp, rdgenCompany);
+    }
+  }
+  String rdgenPbUrl = "https://rustdesk.com";
+  if (isMobile &&
+      rdgenPbLink.isNotEmpty &&
+      rdgenPbLink != "__RDGEN_PB_LINK__") {
+    rdgenPbUrl = rdgenPbLink;
+  }
+  return MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      onTap: () {
+        launchUrl(Uri.parse(rdgenPbUrl));
+      },
+      child: Opacity(
+          opacity: 0.5,
+          child: Text(
+            rdgenPbText,
+            overflow: TextOverflow.clip,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontSize: 9, decoration: TextDecoration.underline),
+          )),
+    ),
+  ).marginOnly(top: 6);
+}
+'''
+
+
+def patch_powered_by() -> None:
+    """手机版「由 xxx 提供支持」：文案用版权公司名称，链接用更新下载链接。
+
+    占位符 __RDGEN_COMPANY__ / __RDGEN_PB_LINK__ 由 workflow 用 env.compname /
+    env.downloadLink 替换；未替换时保持官方行为（translate 文案 + rustdesk.com）。
+    """
+    path = "flutter/lib/common.dart"
+    if not os.path.exists(path):
+        print("[error] 找不到 %s" % path)
+        sys.exit(1)
+    s = read(path)
+    if "rdgen powered-by" in s:
+        print("[skip] common.dart 已经打过 powered-by 补丁")
+        return
+    start = s.find(RG_PB_START)
+    if start < 0:
+        print("[warn] common.dart: 没找到 loadPowered，powered-by 未改")
+        return
+    endmark = s.find(RG_PB_END_MARK, start)
+    if endmark < 0:
+        print("[warn] common.dart: 没找到 loadPowered 结尾，powered-by 未改")
+        return
+    end = endmark + len(RG_PB_END_MARK)
+    s = s[:start] + RG_PB_NEW + s[end:]
+    write(path, s)
+    print("[ok] common.dart: 手机版 powered-by 改用公司名 + 下载链接")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -2267,6 +2342,8 @@ def main() -> None:
         patch_flutter_ffi_only()
     elif action in ("two-finger", "twofinger"):
         patch_two_finger_scroll()
+    elif action in ("powered-by", "poweredby"):
+        patch_powered_by()
     elif action == "flutter-copy-credentials":
         patch_flutter_copy_button()
         patch_flutter_run_as_admin()

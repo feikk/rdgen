@@ -662,6 +662,35 @@ jobs:
           convert ./res/128x128.png -resize 200% ./flutter/assets/128x128@2x.png || true
           cp ./flutter/assets/icon.svg ./res/scalable.svg
 
+      - name: Maven mirror (avoid repo.maven.apache.org 429)
+        shell: bash
+        run: |
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/init.gradle <<'EOF'
+          // rdgen: repo.maven.apache.org 常返回 429 Too Many Requests，导致
+          // :gradle:compileGroovy 解析 javawriter / asm 失败。这里把阿里云镜像
+          // 插到所有仓库列表前面，官方仓库仍然保留在后面兜底。
+          def rdgenMirrors = [
+              'https://maven.aliyun.com/repository/public',
+              'https://maven.aliyun.com/repository/google',
+              'https://maven.aliyun.com/repository/gradle-plugin'
+          ]
+          allprojects { p ->
+              p.buildscript.repositories {
+                  rdgenMirrors.each { m -> maven { url m } }
+              }
+              p.repositories {
+                  rdgenMirrors.each { m -> maven { url m } }
+              }
+          }
+          settingsEvaluated { settings ->
+              settings.pluginManagement.repositories {
+                  rdgenMirrors.each { m -> maven { url m } }
+              }
+          }
+          EOF
+          cat ~/.gradle/init.gradle
+
       - name: Build rustdesk
         shell: bash
         env:
@@ -672,6 +701,16 @@ jobs:
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
           sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
+          # rdgen: 网络抖动（429 / 传输中断）时重试 flutter build，最多 3 次
+          fb() {
+            local i
+            for i in 1 2 3; do
+              flutter build apk "$@" && return 0
+              echo "::warning::flutter build apk failed (attempt $i), retry in 20s"
+              sleep 20
+            done
+            return 1
+          }
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
             mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
@@ -681,7 +720,7 @@ jobs:
             #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
             # build flutter
             pushd flutter
-            flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
+            fb "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
             mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             armv7-linux-androideabi)
@@ -692,7 +731,7 @@ jobs:
               #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
+              fb "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
               mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             x86_64-linux-android)
@@ -703,7 +742,7 @@ jobs:
               #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
+              fb "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             i686-linux-android)
@@ -714,7 +753,7 @@ jobs:
               #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
+              fb "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
           esac

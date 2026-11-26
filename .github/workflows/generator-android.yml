@@ -306,6 +306,22 @@ jobs:
           name: bridge-artifact
           path: ./
 
+      - name: rdgen flutter ffi (android)
+        continue-on-error: true
+        shell: bash
+        run: |
+          # bridge 是从打过 rdgen 补丁的 flutter_ffi.rs 生成的，build 目标必须
+          # 有同样的 ffi 函数，否则 bridge_generated.rs 找不到符号（E0425）
+          curl -fsSL -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py
+          python3 rdgen_patch.py flutter-ffi
+
+      - name: rdgen two finger scroll
+        continue-on-error: true
+        shell: bash
+        run: |
+          curl -fsSL -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py
+          python3 rdgen_patch.py two-finger
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:

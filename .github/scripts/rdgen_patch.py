@@ -2135,6 +2135,62 @@ def patch_flutter_hide_all() -> None:
     print("[ok] server_model.dart: 隐身模式下 CM 窗口始终隐藏")
 
 
+RG_TWO_FINGER_OLD = ("    } else {\n"
+                     "      // mobile\n"
+                     "      ffi.canvasModel.updateScale(d.scale / _scale, d.focalPoint);\n"
+                     "      _scale = d.scale;\n"
+                     "      ffi.canvasModel.panX(d.focalPointDelta.dx);\n"
+                     "      ffi.canvasModel.panY(d.focalPointDelta.dy);\n"
+                     "    }\n")
+
+RG_TWO_FINGER_NEW = ("    } else {\n"
+                     "      // rdgen: two finger scroll (mobile)\n"
+                     "      final rdgenScaleRatio = d.scale / _scale;\n"
+                     "      final rdgenZooming =\n"
+                     "          rdgenScaleRatio < 0.97 || rdgenScaleRatio > 1.03;\n"
+                     "      if (rdgenZooming) {\n"
+                     "        ffi.canvasModel.updateScale(rdgenScaleRatio, d.focalPoint);\n"
+                     "        _scale = d.scale;\n"
+                     "      } else {\n"
+                     "        _scale = 1;\n"
+                     "        if (d.focalPointDelta.dx.abs() > d.focalPointDelta.dy.abs()) {\n"
+                     "          ffi.canvasModel.panX(d.focalPointDelta.dx);\n"
+                     "        } else {\n"
+                     "          _mouseScrollIntegral += d.focalPointDelta.dy / 4;\n"
+                     "          while (_mouseScrollIntegral >= 1) {\n"
+                     "            inputModel.scroll(1);\n"
+                     "            _mouseScrollIntegral -= 1;\n"
+                     "          }\n"
+                     "          while (_mouseScrollIntegral <= -1) {\n"
+                     "            inputModel.scroll(-1);\n"
+                     "            _mouseScrollIntegral += 1;\n"
+                     "          }\n"
+                     "        }\n"
+                     "      }\n"
+                     "    }\n")
+
+
+def patch_two_finger_scroll() -> None:
+    """移动端（Android/iOS）双指上下滑动 = 滚动远端屏幕；捏合仍是缩放。
+
+    原来只有三指竖滑才滚动，双指只能平移画布，手机上很难受。
+    """
+    p = "flutter/lib/common/widgets/remote_input.dart"
+    if not os.path.exists(p):
+        print("[info] 没有 remote_input.dart，跳过双指滚动")
+        return
+    s = read(p)
+    if "rdgen: two finger scroll" in s:
+        print("[skip] remote_input.dart: 双指滚动已存在")
+        return
+    if RG_TWO_FINGER_OLD not in s:
+        print("[warn] remote_input.dart: 没找到两指缩放分支，双指滚动未加")
+        return
+    s = s.replace(RG_TWO_FINGER_OLD, RG_TWO_FINGER_NEW, 1)
+    write(p, s)
+    print("[ok] remote_input.dart: 双指上下滑动改为滚动屏幕")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -2151,6 +2207,8 @@ def main() -> None:
         patch_only_id()
     elif action == "flutter-ffi":
         patch_flutter_ffi_only()
+    elif action in ("two-finger", "twofinger"):
+        patch_two_finger_scroll()
     elif action == "flutter-copy-credentials":
         patch_flutter_copy_button()
         patch_flutter_run_as_admin()

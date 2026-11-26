@@ -508,17 +508,31 @@ jobs:
           curl -fsSL -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py
           python3 rdgen_patch.py powered-by
           python3 - <<'PY'
-          import os
+          import json, os, re
           p = 'flutter/lib/common.dart'
           s = open(p, encoding='utf-8').read()
-          s = s.replace('__RDGEN_COMPANY__', os.environ.get('RDGEN_COMPANY', ''))
-          s = s.replace('__RDGEN_PB_LINK__', os.environ.get('RDGEN_LINK', ''))
+          company = os.environ.get('RDGEN_COMPANY', '').strip()
+          link = os.environ.get('RDGEN_LINK', '').strip()
+          # 占位符在引号内，这里只替换引号里的内容，并把特殊字符转义成 Dart 合法字面量
+          s = s.replace('%%RDGEN_COMPANY%%', json.dumps(company)[1:-1])
+          s = s.replace('%%RDGEN_PB_LINK%%', json.dumps(link)[1:-1])
           open(p, 'w', encoding='utf-8', newline='\n').write(s)
-          print('[ok] powered-by: company=%r link=%r' % (os.environ.get('RDGEN_COMPANY', ''), os.environ.get('RDGEN_LINK', '')))
+
+          def dom(u):
+              u = u.split('//')[-1].split('/')[0] if u else ''
+              return u.replace('.', ' dot ')
+
+          print('[diag] company set=%s, downloadLink domain=%s, urlLink domain=%s'
+                % (bool(company), dom(link), dom(os.environ.get('RDGEN_URL', '').strip())))
+          m = re.search(r'const String rdgenPbLink = "([^"]*)"', s)
+          print('[diag] dart rdgenPbLink domain=%s' % dom(m.group(1) if m else ''))
+          m = re.search(r'const String rdgenCompany = "([^"]*)"', s)
+          print('[diag] dart rdgenCompany=%s' % (m.group(1) if m else 'NOT FOUND'))
           PY
         env:
           RDGEN_COMPANY: ${{ env.compname }}
           RDGEN_LINK: ${{ env.downloadLink }}
+          RDGEN_URL: ${{ env.urlLink }}
 
       - name: allow custom.txt
         uses: nick-fields/retry@v3

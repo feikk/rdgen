@@ -2257,21 +2257,17 @@ RG_PB_NEW = '''Widget loadPowered(BuildContext context) {
     return SizedBox.shrink();
   }
   // rdgen powered-by: mobile shows company name and links to the download url
-  const String rdgenCompany = "__RDGEN_COMPANY__";
-  const String rdgenPbLink = "__RDGEN_PB_LINK__";
+  const String rdgenCompany = "%%RDGEN_COMPANY%%";
+  const String rdgenPbLink = "%%RDGEN_PB_LINK%%";
   var rdgenPbText = translate("powered_by_me");
-  if (isMobile &&
-      rdgenCompany.isNotEmpty &&
-      rdgenCompany != "__RDGEN_COMPANY__") {
+  if (isMobile && rdgenCompany.isNotEmpty) {
     final rdgenApp = bind.mainGetAppNameSync();
     if (rdgenApp.isNotEmpty) {
       rdgenPbText = rdgenPbText.replaceAll(rdgenApp, rdgenCompany);
     }
   }
   String rdgenPbUrl = "https://rustdesk.com";
-  if (isMobile &&
-      rdgenPbLink.isNotEmpty &&
-      rdgenPbLink != "__RDGEN_PB_LINK__") {
+  if (isMobile && rdgenPbLink.isNotEmpty) {
     rdgenPbUrl = rdgenPbLink;
   }
   return MouseRegion(
@@ -2299,8 +2295,8 @@ RG_PB_NEW = '''Widget loadPowered(BuildContext context) {
 def patch_powered_by() -> None:
     """手机版「由 xxx 提供支持」：文案用版权公司名称，链接用更新下载链接。
 
-    占位符 __RDGEN_COMPANY__ / __RDGEN_PB_LINK__ 由 workflow 用 env.compname /
-    env.downloadLink 替换；未替换时保持官方行为（translate 文案 + rustdesk.com）。
+    占位符 %%RDGEN_COMPANY%% / %%RDGEN_PB_LINK%%（引号内）由 workflow 用
+    compname / downloadLink 替换；为空时保持官方行为（translate 文案 + rustdesk.com）。
     """
     path = "flutter/lib/common.dart"
     if not os.path.exists(path):

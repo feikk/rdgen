@@ -2162,7 +2162,7 @@ RG_TF_START_OLD = ("  onTwoFingerScaleStart(ScaleStartDetails d) {\n"
 RG_TF_START_NEW = (RG_TF_START_OLD
                    + "    // rdgen: touchfix 双指手势起点\n"
                    + "    if (rdgenTouchFixOn) {\n"
-                   + "      _rdgenScaleBase = d.scale;\n"
+                   + "      _rdgenScaleBase = 1;\n"
                    + "      _rdgenTwoFingerZoom = false;\n"
                    + "      _mouseScrollIntegral = 0;\n"
                    + "    }\n")

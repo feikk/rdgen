@@ -2321,6 +2321,310 @@ def patch_powered_by() -> None:
     print("[ok] common.dart: 手机版 powered-by 改用公司名 + 下载链接")
 
 
+# ---------------------------------------------------------------------------
+# Android 主控会话后台保活
+# ---------------------------------------------------------------------------
+
+RG_AK_SERVICE_PATH = (
+    "flutter/android/app/src/main/kotlin/com/carriez/flutter_hbb/RdgenKeepAliveService.kt"
+)
+
+RG_AK_SERVICE = """package com.carriez.flutter_hbb
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import java.util.Locale
+
+/**
+ * rdgen: 主控（outgoing）远程会话期间的前台服务。
+ *
+ * Android 12 之后系统有 App Freezer：应用退到后台约 30 秒，进程会被冻结，
+ * socket 收不到心跳，远程连接就断了。被控方向本来就有 MainService 前台服务，
+ * 主控方向没有，所以这里补一个 specialUse 类型的前台服务把进程保活，
+ * 保证切后台/锁屏时连接还能维持（实测可长时间保持，不再几十秒断一次）。
+ */
+class RdgenKeepAliveService : Service() {
+
+    companion object {
+        private const val TAG = "LOG_KEEPALIVE"
+        private const val CHANNEL_ID = "rdgen_keepalive"
+        private const val NOTIFY_ID = 1001
+    }
+
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "RdgenKeepAliveService onCreate, sdk:" + Build.VERSION.SDK_INT)
+        createNotificationChannel()
+        val notification = buildNotification()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFY_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFY_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed", e)
+        }
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "rdgen:keepalive").apply {
+            setReferenceCounted(false)
+            // 单次上限 3 小时，够覆盖一次远程运维，结束时在 onDestroy 释放
+            acquire(3L * 60L * 60L * 1000L)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 被从最近任务里划掉：UI 已经没了，先把会话关干净再退出，避免残留连接
+        Log.d(TAG, "onTaskRemoved, closing outgoing sessions")
+        try {
+            FFI.closeAllSessions()
+        } catch (e: Exception) {
+            Log.e(TAG, "closeAllSessions failed", e)
+        }
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onDestroy() {
+        Log.d(TAG, "RdgenKeepAliveService onDestroy")
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+        stopForeground(true)
+        super.onDestroy()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Remote session",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Keep the remote session alive in background"
+                    setShowBadge(false)
+                }
+                nm.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+        val isZh = Locale.getDefault().language.startsWith("zh")
+        val title = if (isZh) "\u8fdc\u7a0b\u4f1a\u8bdd\u4fdd\u6301\u8fde\u63a5" else "Remote session active"
+        val text = if (isZh) "\u5207\u5230\u540e\u53f0\u540e\u4ecd\u4f1a\u4fdd\u6301\u8fde\u63a5" else "Connection stays alive in background"
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setOngoing(true)
+            .setSmallIcon(R.mipmap.ic_stat_logo)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(pendingIntent)
+            .setColor(ContextCompat.getColor(this, R.color.primary))
+            .build()
+    }
+}
+"""
+
+RG_AK_MANIFEST_ENTRY = """        <service
+            android:name=".RdgenKeepAliveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="@string/foreground_service_special_use_subtype" />
+        </service>
+
+"""
+
+RG_AK_CHANNEL_CASES = """                "rdgen_keepalive_start" -> {
+                    rdgenKeepAlive(true)
+                    result.success(true)
+                }
+                "rdgen_keepalive_stop" -> {
+                    rdgenKeepAlive(false)
+                    result.success(true)
+                }
+"""
+
+RG_AK_MAIN_HELPER = """    private var rdgenKeepAliveRefs = 0
+
+    // rdgen: 主控会话保活。refs 是同一进程内的引用计数，最后一个会话结束时才真正停服务
+    private fun rdgenKeepAlive(acquire: Boolean) {
+        val intent = Intent(this, RdgenKeepAliveService::class.java)
+        if (acquire) {
+            rdgenKeepAliveRefs += 1
+            if (rdgenKeepAliveRefs == 1) {
+                Log.d(logTag, "rdgen keepalive start")
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "rdgen keepalive start failed", e)
+                }
+            }
+        } else {
+            if (rdgenKeepAliveRefs > 0) {
+                rdgenKeepAliveRefs -= 1
+            }
+            if (rdgenKeepAliveRefs == 0) {
+                Log.d(logTag, "rdgen keepalive stop")
+                try {
+                    stopService(intent)
+                } catch (e: Exception) {
+                    Log.e(logTag, "rdgen keepalive stop failed", e)
+                }
+            }
+        }
+    }
+
+"""
+
+def patch_android_keepalive() -> None:
+    """Android 主控（outgoing）会话后台保活：
+    新增 RdgenKeepAliveService 前台服务 + Manifest 注册 + MainActivity 通道，
+    并在 flutter 手机端远程页进入/退出时调用它。
+    默认开启（不依赖任何构建参数），被控方向本来就有 MainService 保活。
+    """
+    d = os.path.dirname(RG_AK_SERVICE_PATH)
+    if not os.path.isdir(d):
+        print("[warn] 没有 android 目录，跳过 android keepalive")
+        return
+
+    if os.path.exists(RG_AK_SERVICE_PATH) and "RdgenKeepAliveService" in read(RG_AK_SERVICE_PATH):
+        print("[skip] RdgenKeepAliveService.kt 已存在")
+    else:
+        write(RG_AK_SERVICE_PATH, RG_AK_SERVICE)
+        print("[ok] 新增 RdgenKeepAliveService.kt")
+
+    mf = "flutter/android/app/src/main/AndroidManifest.xml"
+    if os.path.exists(mf):
+        s = read(mf)
+        if "RdgenKeepAliveService" in s:
+            print("[skip] AndroidManifest.xml 已注册前台服务")
+        elif "    </application>" in s:
+            s = s.replace("    </application>", RG_AK_MANIFEST_ENTRY + "    </application>", 1)
+            write(mf, s)
+            print("[ok] AndroidManifest.xml 已注册 RdgenKeepAliveService")
+        else:
+            print("[warn] AndroidManifest.xml 没找到 </application>")
+    else:
+        print("[warn] 没找到 AndroidManifest.xml")
+
+    ma = "flutter/android/app/src/main/kotlin/com/carriez/flutter_hbb/MainActivity.kt"
+    if os.path.exists(ma):
+        s = read(ma)
+        if "rdgen_keepalive_start" in s:
+            print("[skip] MainActivity.kt 通道已存在")
+        else:
+            anchor_case = '                "check_permission" -> {\n'
+            anchor_helper = "    private fun initFlutterChannel(flutterMethodChannel: MethodChannel) {\n"
+            if anchor_case in s and anchor_helper in s:
+                s = s.replace(anchor_case, RG_AK_CHANNEL_CASES + anchor_case, 1)
+                s = s.replace(anchor_helper, RG_AK_MAIN_HELPER + anchor_helper, 1)
+                write(ma, s)
+                print("[ok] MainActivity.kt 已加入 rdgen_keepalive_start/stop 通道")
+            else:
+                print("[warn] MainActivity.kt 锚点没找到，keepalive 通道未插入")
+        # 退出应用时把保活服务也关掉，避免残留
+        s = read(ma)
+        odead = """        if (isFinishing) {
+            FFI.closeAllSessions()
+        }
+"""
+        if "stopService(Intent(this, RdgenKeepAliveService::class.java))" not in s and odead in s:
+            s = s.replace(odead, """        if (isFinishing) {
+            FFI.closeAllSessions()
+            rdgenKeepAliveRefs = 0
+            stopService(Intent(this, RdgenKeepAliveService::class.java))
+        }
+""", 1)
+            write(ma, s)
+            print("[ok] MainActivity.kt onDestroy 已清理 keepalive 服务")
+        else:
+            print("[skip] MainActivity.kt onDestroy 无需清理")
+    else:
+        print("[warn] 没找到 MainActivity.kt")
+
+    rp = "flutter/lib/mobile/pages/remote_page.dart"
+    if os.path.exists(rp):
+        s = read(rp)
+        if "rdgen_keepalive_start" in s:
+            print("[skip] remote_page.dart 已接入 keepalive")
+        else:
+            start_anchor = """    gFFI.start(
+      widget.id,
+      loginMethod: widget.loginMethod,
+      password: widget.password,
+      isSharedPassword: widget.isSharedPassword,
+      forceRelay: widget.forceRelay,
+    );
+"""
+            start_call = start_anchor + """    // rdgen: \u4e3b\u63a7\u4f1a\u8bdd\u671f\u95f4\u7528\u524d\u53f0\u670d\u52a1\u4fdd\u6d3b\uff0c\u907f\u514d\u5207\u5230\u540e\u53f0\u7ea6 30 \u79d2\u88ab\u7cfb\u7edf\u51bb\u7ed3\u65ad\u8fde
+    unawaited(gFFI.invokeMethod('rdgen_keepalive_start'));
+"""
+            stop_anchor = "    unawaited(bind.sessionClose(sessionId: sessionId));\n"
+            stop_call = stop_anchor + "    unawaited(gFFI.invokeMethod('rdgen_keepalive_stop'));\n"
+            ok = False
+            if start_anchor in s:
+                s = s.replace(start_anchor, start_call, 1)
+                ok = True
+            else:
+                print("[warn] remote_page.dart 没找到 gFFI.start 锚点，start 未插入")
+            if stop_anchor in s:
+                s = s.replace(stop_anchor, stop_call, 1)
+                ok = True
+            else:
+                print("[warn] remote_page.dart 没找到 sessionClose 锚点，stop 未插入")
+            if ok:
+                write(rp, s)
+                print("[ok] remote_page.dart 已接入 keepalive start/stop")
+    else:
+        print("[warn] 没找到 mobile/pages/remote_page.dart")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -2335,6 +2639,8 @@ def main() -> None:
         patch_install_button()
         patch_flutter_install_button()
         patch_only_id()
+    elif action in ("android-keepalive", "keepalive"):
+        patch_android_keepalive()
     elif action == "flutter-ffi":
         patch_flutter_ffi_only()
     elif action in ("two-finger", "twofinger"):

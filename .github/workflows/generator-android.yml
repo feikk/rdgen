@@ -322,6 +322,14 @@ jobs:
           curl -fsSL -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py
           python3 rdgen_patch.py two-finger
 
+      - name: rdgen android keepalive
+        continue-on-error: true
+        shell: bash
+        run: |
+          # 主控（outgoing）会话的前台服务保活：切后台/锁屏不再几十秒断连
+          curl -fsSL -o rdgen_patch.py https://raw.githubusercontent.com/feikk/rdgen/master/.github/scripts/rdgen_patch.py
+          python3 rdgen_patch.py android-keepalive
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
